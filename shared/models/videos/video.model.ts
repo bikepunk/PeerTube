@@ -1,4 +1,4 @@
-import { AccountSummary, VideoChannelSummary, VideoResolution, VideoState } from '../../index'
+import { AccountSummary, VideoChannelSummary, VideoState } from '../../index'
 import { Account } from '../actors'
 import { VideoChannel } from './channel/video-channel.model'
 import { VideoPrivacy } from './video-privacy.enum'
@@ -22,9 +22,19 @@ export interface Video {
   duration: number
   isLocal: boolean
   name: string
+
   thumbnailPath: string
+  thumbnailUrl?: string
+
   previewPath: string
+  previewUrl?: string
+
   embedPath: string
+  embedUrl?: string
+
+  // When using the search index
+  url?: string
+
   views: number
   likes: number
   dislikes: number

@@ -4,10 +4,10 @@ import { logger } from '../../../helpers/logger'
 import { ActivityAudience, ActivityFlag } from '../../../../shared/models/activitypub'
 import { audiencify, getAudience } from '../audience'
 import { Transaction } from 'sequelize'
-import { MActor, MVideoFullLight } from '../../../typings/models'
-import { MVideoAbuseVideo } from '../../../typings/models/video'
+import { MActor, MVideoFullLight } from '../../../types/models'
+import { MVideoAbuseVideo } from '../../../types/models/video'
 
-async function sendVideoAbuse (byActor: MActor, videoAbuse: MVideoAbuseVideo, video: MVideoFullLight, t: Transaction) {
+function sendVideoAbuse (byActor: MActor, videoAbuse: MVideoAbuseVideo, video: MVideoFullLight, t: Transaction) {
   if (!video.VideoChannel.Account.Actor.serverId) return // Local user
 
   const url = getVideoAbuseActivityPubUrl(videoAbuse)

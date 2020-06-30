@@ -1,16 +1,19 @@
 import { Component, OnDestroy, OnInit } from '@angular/core'
 import { ActivatedRoute, Router } from '@angular/router'
-import { immutableAssign } from '@app/shared/misc/utils'
-import { ComponentPagination } from '@app/shared/rest/component-pagination.model'
-import { AuthService } from '../../core/auth'
-import { ConfirmService } from '../../core/confirm'
-import { AbstractVideoList } from '../../shared/video/abstract-video-list'
-import { VideoService } from '../../shared/video/video.service'
+import {
+  AuthService,
+  ComponentPagination,
+  ConfirmService,
+  LocalStorageService,
+  Notifier,
+  ScreenService,
+  ServerService,
+  UserService
+} from '@app/core'
+import { immutableAssign } from '@app/helpers'
+import { UserHistoryService } from '@app/shared/shared-main'
+import { AbstractVideoList } from '@app/shared/shared-video-miniature'
 import { I18n } from '@ngx-translate/i18n-polyfill'
-import { ScreenService } from '@app/shared/misc/screen.service'
-import { UserHistoryService } from '@app/shared/users/user-history.service'
-import { UserService } from '@app/shared'
-import { Notifier, ServerService } from '@app/core'
 
 @Component({
   selector: 'my-account-history',
@@ -35,8 +38,8 @@ export class MyAccountHistoryComponent extends AbstractVideoList implements OnIn
     protected userService: UserService,
     protected notifier: Notifier,
     protected screenService: ScreenService,
+    protected storageService: LocalStorageService,
     private confirmService: ConfirmService,
-    private videoService: VideoService,
     private userHistoryService: UserHistoryService
   ) {
     super()

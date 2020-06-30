@@ -25,7 +25,7 @@ import { CONFIG } from './config'
 import { ScheduleVideoUpdateModel } from '../models/video/schedule-video-update'
 import { VideoCaptionModel } from '../models/video/video-caption'
 import { VideoImportModel } from '../models/video/video-import'
-import { VideoViewModel } from '../models/video/video-views'
+import { VideoViewModel } from '../models/video/video-view'
 import { VideoChangeOwnershipModel } from '../models/video/video-change-ownership'
 import { VideoRedundancyModel } from '../models/redundancy/video-redundancy'
 import { UserVideoHistoryModel } from '../models/account/user-video-history'
@@ -119,8 +119,6 @@ async function initDatabaseModels (silent: boolean) {
   await createFunctions()
 
   if (!silent) logger.info('Database %s is ready.', dbname)
-
-  return
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +161,7 @@ async function checkPostgresExtension (extension: string) {
   }
 }
 
-async function createFunctions () {
+function createFunctions () {
   const query = `CREATE OR REPLACE FUNCTION immutable_unaccent(text)
   RETURNS text AS
 $func$

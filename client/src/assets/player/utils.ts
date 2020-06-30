@@ -8,6 +8,14 @@ function isWebRTCDisabled () {
   return !!((window as any).RTCPeerConnection || (window as any).mozRTCPeerConnection || (window as any).webkitRTCPeerConnection) === false
 }
 
+function isIOS () {
+  return !!navigator.platform && /iPad|iPhone|iPod/.test(navigator.platform)
+}
+
+function isSafari () {
+  return /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+}
+
 // https://github.com/danrevah/ngx-pipes/blob/master/src/pipes/math/bytes.ts
 // Don't import all Angular stuff, just copy the code with shame
 const dictionaryBytes: Array<{max: number, type: string}> = [
@@ -51,6 +59,9 @@ function buildVideoLink (options: {
     : window.location.origin + window.location.pathname.replace('/embed/', '/watch/')
 
   const params = new URLSearchParams(window.location.search)
+  // Remove these unused parameters when we are on a playlist page
+  params.delete('videoId')
+  params.delete('resume')
 
   if (options.startTime) {
     const startTimeInt = Math.floor(options.startTime)
@@ -122,7 +133,7 @@ function secondsToTime (seconds: number, full = false, symbol?: string) {
 
 function buildVideoEmbed (embedUrl: string) {
   return '<iframe width="560" height="315" ' +
-    'sandbox="allow-same-origin allow-scripts" ' +
+    'sandbox="allow-same-origin allow-scripts allow-popups" ' +
     'src="' + embedUrl + '" ' +
     'frameborder="0" allowfullscreen>' +
     '</iframe>'
@@ -189,5 +200,7 @@ export {
   videoFileMinByResolution,
   copyToClipboard,
   isMobile,
-  bytes
+  bytes,
+  isIOS,
+  isSafari
 }

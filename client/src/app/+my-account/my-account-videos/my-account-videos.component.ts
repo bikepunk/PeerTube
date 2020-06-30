@@ -1,28 +1,22 @@
-import { concat, Observable } from 'rxjs'
-import { tap, toArray } from 'rxjs/operators'
-import { Component, ViewChild } from '@angular/core'
+import { concat, Observable, Subject } from 'rxjs'
+import { debounceTime, tap, toArray } from 'rxjs/operators'
+import { Component, OnInit, ViewChild } from '@angular/core'
 import { ActivatedRoute, Router } from '@angular/router'
-import { immutableAssign } from '@app/shared/misc/utils'
-import { ComponentPagination } from '@app/shared/rest/component-pagination.model'
-import { Notifier, ServerService } from '@app/core'
-import { AuthService } from '../../core/auth'
-import { ConfirmService } from '../../core/confirm'
-import { Video } from '../../shared/video/video.model'
-import { VideoService } from '../../shared/video/video.service'
-import { I18n } from '@ngx-translate/i18n-polyfill'
-import { ScreenService } from '@app/shared/misc/screen.service'
-import { VideoChangeOwnershipComponent } from './video-change-ownership/video-change-ownership.component'
-import { MiniatureDisplayOptions } from '@app/shared/video/video-miniature.component'
-import { SelectionType, VideosSelectionComponent } from '@app/shared/video/videos-selection.component'
-import { VideoSortField } from '@app/shared/video/sort-field.type'
+import { AuthService, ComponentPagination, ConfirmService, Notifier, ScreenService, ServerService } from '@app/core'
 import { DisableForReuseHook } from '@app/core/routing/disable-for-reuse-hook'
+import { immutableAssign } from '@app/helpers'
+import { Video, VideoService } from '@app/shared/shared-main'
+import { MiniatureDisplayOptions, OwnerDisplayType, SelectionType, VideosSelectionComponent } from '@app/shared/shared-video-miniature'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { VideoSortField } from '@shared/models'
+import { VideoChangeOwnershipComponent } from './video-change-ownership/video-change-ownership.component'
 
 @Component({
   selector: 'my-account-videos',
   templateUrl: './my-account-videos.component.html',
   styleUrls: [ './my-account-videos.component.scss' ]
 })
-export class MyAccountVideosComponent implements DisableForReuseHook {
+export class MyAccountVideosComponent implements OnInit, DisableForReuseHook {
   @ViewChild('videosSelection', { static: true }) videosSelection: VideosSelectionComponent
   @ViewChild('videoChangeOwnershipModal', { static: true }) videoChangeOwnershipModal: VideoChangeOwnershipComponent
 
@@ -30,19 +24,23 @@ export class MyAccountVideosComponent implements DisableForReuseHook {
   selection: SelectionType = {}
   pagination: ComponentPagination = {
     currentPage: 1,
-    itemsPerPage: 5,
+    itemsPerPage: 10,
     totalItems: null
   }
   miniatureDisplayOptions: MiniatureDisplayOptions = {
     date: true,
     views: true,
-    by: false,
+    by: true,
     privacyLabel: false,
     privacyText: true,
     state: true,
     blacklistInfo: true
   }
+  ownerDisplayType: OwnerDisplayType = 'videoChannel'
+
   videos: Video[] = []
+  videosSearch: string
+  videosSearchChanged = new Subject<string>()
   getVideosObservableFunction = this.getVideosObservable.bind(this)
 
   constructor (
@@ -59,6 +57,19 @@ export class MyAccountVideosComponent implements DisableForReuseHook {
     this.titlePage = this.i18n('My videos')
   }
 
+  ngOnInit () {
+    this.videosSearchChanged
+      .pipe(
+        debounceTime(500))
+      .subscribe(() => {
+        this.videosSelection.reloadVideos()
+      })
+  }
+
+  onVideosSearchChanged () {
+    this.videosSearchChanged.next()
+  }
+
   disableForReuse () {
     this.videosSelection.disableForReuse()
   }
@@ -70,7 +81,10 @@ export class MyAccountVideosComponent implements DisableForReuseHook {
   getVideosObservable (page: number, sort: VideoSortField) {
     const newPagination = immutableAssign(this.pagination, { currentPage: page })
 
-    return this.videoService.getMyVideos(newPagination, sort)
+    return this.videoService.getMyVideos(newPagination, sort, this.videosSearch)
+      .pipe(
+        tap(res => this.pagination.totalItems = res.total)
+      )
   }
 
   async deleteSelectedVideos () {

@@ -1,20 +1,17 @@
+import { Hotkey, HotkeysService } from 'angular2-hotkeys'
 import { Observable, ReplaySubject, Subject, throwError as observableThrowError } from 'rxjs'
 import { catchError, map, mergeMap, share, tap } from 'rxjs/operators'
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http'
 import { Injectable } from '@angular/core'
 import { Router } from '@angular/router'
 import { Notifier } from '@app/core/notification/notifier.service'
-import { OAuthClientLocal, User as UserServerModel, UserRefreshToken } from '../../../../../shared'
-import { User } from '../../../../../shared/models/users'
-import { UserLogin } from '../../../../../shared/models/users/user-login.model'
+import { objectToUrlEncoded, peertubeLocalStorage } from '@app/helpers'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { MyUser as UserServerModel, OAuthClientLocal, User, UserLogin, UserRefreshToken } from '@shared/models'
 import { environment } from '../../../environments/environment'
-import { RestExtractor } from '../../shared/rest/rest-extractor.service'
+import { RestExtractor } from '../rest/rest-extractor.service'
 import { AuthStatus } from './auth-status.model'
 import { AuthUser } from './auth-user.model'
-import { objectToUrlEncoded } from '@app/shared/misc/utils'
-import { peertubeLocalStorage } from '@app/shared/misc/peertube-local-storage'
-import { I18n } from '@ngx-translate/i18n-polyfill'
-import { Hotkey, HotkeysService } from 'angular2-hotkeys'
 
 interface UserLoginWithUsername extends UserLogin {
   access_token: string
@@ -29,6 +26,7 @@ type UserLoginWithUserInformation = UserLoginWithUsername & User
 export class AuthService {
   private static BASE_CLIENT_URL = environment.apiUrl + '/api/v1/oauth-clients/local'
   private static BASE_TOKEN_URL = environment.apiUrl + '/api/v1/users/token'
+  private static BASE_REVOKE_TOKEN_URL = environment.apiUrl + '/api/v1/users/revoke-token'
   private static BASE_USER_INFORMATION_URL = environment.apiUrl + '/api/v1/users/me'
   private static LOCAL_STORAGE_OAUTH_CLIENT_KEYS = {
     CLIENT_ID: 'client_id',
@@ -145,7 +143,7 @@ export class AuthService {
     return !!this.getAccessToken()
   }
 
-  login (username: string, password: string) {
+  login (username: string, password: string, token?: string) {
     // Form url encoded
     const body = {
       client_id: this.clientId,
@@ -156,6 +154,8 @@ export class AuthService {
       username,
       password
     }
+
+    if (token) Object.assign(body, { externalAuthToken: token })
 
     const headers = new HttpHeaders().set('Content-Type', 'application/x-www-form-urlencoded')
     return this.http.post<UserLogin>(AuthService.BASE_TOKEN_URL, objectToUrlEncoded(body), { headers })
@@ -168,7 +168,16 @@ export class AuthService {
   }
 
   logout () {
-    // TODO: make an HTTP request to revoke the tokens
+    const authHeaderValue = this.getRequestHeaderValue()
+    const headers = new HttpHeaders().set('Authorization', authHeaderValue)
+
+    this.http.post<void>(AuthService.BASE_REVOKE_TOKEN_URL, {}, { headers })
+    .subscribe(
+      () => { /* nothing to do */ },
+
+      err => console.error(err)
+    )
+
     this.user = null
 
     AuthUser.flush()

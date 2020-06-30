@@ -1,18 +1,32 @@
 import * as Bull from 'bull'
-import { JobState, JobType } from '../../../shared/models'
+import {
+  ActivitypubFollowPayload,
+  ActivitypubHttpBroadcastPayload,
+  ActivitypubHttpFetcherPayload,
+  ActivitypubHttpUnicastPayload,
+  EmailPayload,
+  JobState,
+  JobType,
+  RefreshPayload,
+  VideoFileImportPayload,
+  VideoImportPayload,
+  VideoRedundancyPayload,
+  VideoTranscodingPayload
+} from '../../../shared/models'
 import { logger } from '../../helpers/logger'
 import { Redis } from '../redis'
 import { JOB_ATTEMPTS, JOB_COMPLETED_LIFETIME, JOB_CONCURRENCY, JOB_TTL, REPEAT_JOBS, WEBSERVER } from '../../initializers/constants'
-import { ActivitypubHttpBroadcastPayload, processActivityPubHttpBroadcast } from './handlers/activitypub-http-broadcast'
-import { ActivitypubHttpFetcherPayload, processActivityPubHttpFetcher } from './handlers/activitypub-http-fetcher'
-import { ActivitypubHttpUnicastPayload, processActivityPubHttpUnicast } from './handlers/activitypub-http-unicast'
-import { EmailPayload, processEmail } from './handlers/email'
-import { processVideoTranscoding, VideoTranscodingPayload } from './handlers/video-transcoding'
-import { ActivitypubFollowPayload, processActivityPubFollow } from './handlers/activitypub-follow'
-import { processVideoImport, VideoImportPayload } from './handlers/video-import'
+import { processActivityPubHttpBroadcast } from './handlers/activitypub-http-broadcast'
+import { processActivityPubHttpFetcher } from './handlers/activitypub-http-fetcher'
+import { processActivityPubHttpUnicast } from './handlers/activitypub-http-unicast'
+import { processEmail } from './handlers/email'
+import { processVideoTranscoding } from './handlers/video-transcoding'
+import { processActivityPubFollow } from './handlers/activitypub-follow'
+import { processVideoImport } from './handlers/video-import'
 import { processVideosViews } from './handlers/video-views'
-import { refreshAPObject, RefreshPayload } from './handlers/activitypub-refresher'
-import { processVideoFileImport, VideoFileImportPayload } from './handlers/video-file-import'
+import { refreshAPObject } from './handlers/activitypub-refresher'
+import { processVideoFileImport } from './handlers/video-file-import'
+import { processVideoRedundancy } from '@server/lib/job-queue/handlers/video-redundancy'
 
 type CreateJobArgument =
   { type: 'activitypub-http-broadcast', payload: ActivitypubHttpBroadcastPayload } |
@@ -24,20 +38,21 @@ type CreateJobArgument =
   { type: 'email', payload: EmailPayload } |
   { type: 'video-import', payload: VideoImportPayload } |
   { type: 'activitypub-refresher', payload: RefreshPayload } |
-  { type: 'videos-views', payload: {} }
+  { type: 'videos-views', payload: {} } |
+  { type: 'video-redundancy', payload: VideoRedundancyPayload }
 
-const handlers: { [ id in (JobType | 'video-file') ]: (job: Bull.Job) => Promise<any>} = {
+const handlers: { [id in JobType]: (job: Bull.Job) => Promise<any> } = {
   'activitypub-http-broadcast': processActivityPubHttpBroadcast,
   'activitypub-http-unicast': processActivityPubHttpUnicast,
   'activitypub-http-fetcher': processActivityPubHttpFetcher,
   'activitypub-follow': processActivityPubFollow,
   'video-file-import': processVideoFileImport,
   'video-transcoding': processVideoTranscoding,
-  'video-file': processVideoTranscoding, // TODO: remove it (changed in 1.3)
   'email': processEmail,
   'video-import': processVideoImport,
   'videos-views': processVideosViews,
-  'activitypub-refresher': refreshAPObject
+  'activitypub-refresher': refreshAPObject,
+  'video-redundancy': processVideoRedundancy
 }
 
 const jobTypes: JobType[] = [
@@ -50,20 +65,22 @@ const jobTypes: JobType[] = [
   'video-file-import',
   'video-import',
   'videos-views',
-  'activitypub-refresher'
+  'activitypub-refresher',
+  'video-redundancy'
 ]
 
 class JobQueue {
 
   private static instance: JobQueue
 
-  private queues: { [ id in JobType ]?: Bull.Queue } = {}
+  private queues: { [id in JobType]?: Bull.Queue } = {}
   private initialized = false
   private jobRedisPrefix: string
 
-  private constructor () {}
+  private constructor () {
+  }
 
-  async init () {
+  init () {
     // Already initialized
     if (this.initialized === true) return
     this.initialized = true
@@ -105,11 +122,16 @@ class JobQueue {
     }
   }
 
-  createJob (obj: CreateJobArgument) {
+  createJob (obj: CreateJobArgument): void {
+    this.createJobWithPromise(obj)
+        .catch(err => logger.error('Cannot create job.', { err, obj }))
+  }
+
+  createJobWithPromise (obj: CreateJobArgument) {
     const queue = this.queues[obj.type]
     if (queue === undefined) {
       logger.error('Unknown queue %s: cannot create job.', obj.type)
-      throw Error('Unknown queue, cannot create job')
+      return
     }
 
     const jobArgs: Bull.JobOptions = {
@@ -121,19 +143,26 @@ class JobQueue {
     return queue.add(obj.payload, jobArgs)
   }
 
-  async listForApi (state: JobState, start: number, count: number, asc?: boolean): Promise<Bull.Job[]> {
+  async listForApi (options: {
+    state: JobState
+    start: number
+    count: number
+    asc?: boolean
+    jobType: JobType
+  }): Promise<Bull.Job[]> {
+    const { state, start, count, asc, jobType } = options
     let results: Bull.Job[] = []
 
-    // TODO: optimize
-    for (const jobType of jobTypes) {
-      const queue = this.queues[ jobType ]
+    const filteredJobTypes = this.filterJobTypes(jobType)
+
+    for (const jobType of filteredJobTypes) {
+      const queue = this.queues[jobType]
       if (queue === undefined) {
         logger.error('Unknown queue %s to list jobs.', jobType)
         continue
       }
 
-      // FIXME: Bull queue typings does not have getJobs method
-      const jobs = await (queue as any).getJobs(state, 0, start + count, asc)
+      const jobs = await queue.getJobs([ state ], 0, start + count, asc)
       results = results.concat(jobs)
     }
 
@@ -149,11 +178,13 @@ class JobQueue {
     return results.slice(start, start + count)
   }
 
-  async count (state: JobState): Promise<number> {
+  async count (state: JobState, jobType?: JobType): Promise<number> {
     let total = 0
 
-    for (const type of jobTypes) {
-      const queue = this.queues[ type ]
+    const filteredJobTypes = this.filterJobTypes(jobType)
+
+    for (const type of filteredJobTypes) {
+      const queue = this.queues[type]
       if (queue === undefined) {
         logger.error('Unknown queue %s to count jobs.', type)
         continue
@@ -161,7 +192,7 @@ class JobQueue {
 
       const counts = await queue.getJobCounts()
 
-      total += counts[ state ]
+      total += counts[state]
     }
 
     return total
@@ -177,7 +208,13 @@ class JobQueue {
   private addRepeatableJobs () {
     this.queues['videos-views'].add({}, {
       repeat: REPEAT_JOBS['videos-views']
-    })
+    }).catch(err => logger.error('Cannot add repeatable job.', { err }))
+  }
+
+  private filterJobTypes (jobType?: JobType) {
+    if (!jobType) return jobTypes
+
+    return jobTypes.filter(t => t === jobType)
   }
 
   static get Instance () {
@@ -188,5 +225,6 @@ class JobQueue {
 // ---------------------------------------------------------------------------
 
 export {
+  jobTypes,
   JobQueue
 }

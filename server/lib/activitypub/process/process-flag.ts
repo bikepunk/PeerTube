@@ -1,14 +1,20 @@
-import { ActivityCreate, ActivityFlag, VideoAbuseState } from '../../../../shared'
+import {
+  ActivityCreate,
+  ActivityFlag,
+  VideoAbuseState,
+  videoAbusePredefinedReasonsMap
+} from '../../../../shared'
 import { VideoAbuseObject } from '../../../../shared/models/activitypub/objects'
 import { retryTransactionWrapper } from '../../../helpers/database-utils'
 import { logger } from '../../../helpers/logger'
-import { sequelizeTypescript } from '../../../initializers'
+import { sequelizeTypescript } from '../../../initializers/database'
 import { VideoAbuseModel } from '../../../models/video/video-abuse'
 import { getOrCreateVideoAndAccountAndChannel } from '../videos'
 import { Notifier } from '../../notifier'
 import { getAPId } from '../../../helpers/activitypub'
-import { APProcessorOptions } from '../../../typings/activitypub-processor.model'
-import { MActorSignature, MVideoAbuseVideo } from '../../../typings/models'
+import { APProcessorOptions } from '../../../types/activitypub-processor.model'
+import { MActorSignature, MVideoAbuseAccountVideo } from '../../../types/models'
+import { AccountModel } from '@server/models/account/account'
 
 async function processFlagActivity (options: APProcessorOptions<ActivityCreate | ActivityFlag>) {
   const { activity, byActor } = options
@@ -36,24 +42,40 @@ async function processCreateVideoAbuse (activity: ActivityCreate | ActivityFlag,
       logger.debug('Reporting remote abuse for video %s.', getAPId(object))
 
       const { video } = await getOrCreateVideoAndAccountAndChannel({ videoObject: object })
+      const reporterAccount = await sequelizeTypescript.transaction(async t => AccountModel.load(account.id, t))
+      const tags = Array.isArray(flag.tag) ? flag.tag : []
+      const predefinedReasons = tags.map(tag => videoAbusePredefinedReasonsMap[tag.name])
+                                    .filter(v => !isNaN(v))
+      const startAt = flag.startAt
+      const endAt = flag.endAt
 
-      const videoAbuse = await sequelizeTypescript.transaction(async t => {
+      const videoAbuseInstance = await sequelizeTypescript.transaction(async t => {
         const videoAbuseData = {
           reporterAccountId: account.id,
           reason: flag.content,
           videoId: video.id,
-          state: VideoAbuseState.PENDING
+          state: VideoAbuseState.PENDING,
+          predefinedReasons,
+          startAt,
+          endAt
         }
 
-        const videoAbuseInstance = await VideoAbuseModel.create(videoAbuseData, { transaction: t }) as MVideoAbuseVideo
+        const videoAbuseInstance: MVideoAbuseAccountVideo = await VideoAbuseModel.create(videoAbuseData, { transaction: t })
         videoAbuseInstance.Video = video
+        videoAbuseInstance.Account = reporterAccount
 
         logger.info('Remote abuse for video uuid %s created', flag.object)
 
         return videoAbuseInstance
       })
 
-      Notifier.Instance.notifyOnNewVideoAbuse(videoAbuse)
+      const videoAbuseJSON = videoAbuseInstance.toFormattedJSON()
+
+      Notifier.Instance.notifyOnNewVideoAbuse({
+        videoAbuse: videoAbuseJSON,
+        videoAbuseInstance,
+        reporter: reporterAccount.Actor.getIdentifier()
+      })
     } catch (err) {
       logger.debug('Cannot process report of %s. (Maybe not a video abuse).', getAPId(object), { err })
     }

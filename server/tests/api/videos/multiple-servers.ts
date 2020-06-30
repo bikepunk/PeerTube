@@ -1,4 +1,4 @@
-/* tslint:disable:no-unused-expression */
+/* eslint-disable @typescript-eslint/no-unused-expressions,@typescript-eslint/require-await */
 
 import * as chai from 'chai'
 import 'mocha'
@@ -37,7 +37,8 @@ import {
   addVideoCommentThread,
   deleteVideoComment,
   getVideoCommentThreads,
-  getVideoThreadComments
+  getVideoThreadComments,
+  findCommentId
 } from '../../../../shared/extra-utils/videos/video-comments'
 import { waitJobs } from '../../../../shared/extra-utils/server/jobs'
 
@@ -63,9 +64,9 @@ describe('Test multiple servers', function () {
         displayName: 'my channel',
         description: 'super channel'
       }
-      await addVideoChannel(servers[ 0 ].url, servers[ 0 ].accessToken, videoChannel)
-      const channelRes = await getVideoChannelsList(servers[ 0 ].url, 0, 1)
-      videoChannelId = channelRes.body.data[ 0 ].id
+      await addVideoChannel(servers[0].url, servers[0].accessToken, videoChannel)
+      const channelRes = await getVideoChannelsList(servers[0].url, 0, 1)
+      videoChannelId = channelRes.body.data[0].id
     }
 
     // Server 1 and server 2 follow each other
@@ -163,7 +164,7 @@ describe('Test multiple servers', function () {
         username: 'user1',
         password: 'super_password'
       }
-      await createUser({ url: servers[ 1 ].url, accessToken: servers[ 1 ].accessToken, username: user.username, password: user.password })
+      await createUser({ url: servers[1].url, accessToken: servers[1].accessToken, username: user.username, password: user.password })
       const userAccessToken = await userLogin(servers[1], user)
 
       const videoAttributes = {
@@ -516,6 +517,8 @@ describe('Test multiple servers', function () {
       // Wait the repeatable job
       await wait(6000)
 
+      await waitJobs(servers)
+
       for (const server of servers) {
         const res = await getVideosList(server.url)
 
@@ -549,6 +552,8 @@ describe('Test multiple servers', function () {
 
       // Wait the repeatable job
       await wait(16000)
+
+      await waitJobs(servers)
 
       let baseVideos = null
 
@@ -692,8 +697,8 @@ describe('Test multiple servers', function () {
 
     it('Should not have files of videos 3 and 3-2 on each server', async function () {
       for (const server of servers) {
-        await checkVideoFilesWereRemoved(toRemove[0].uuid, server.serverNumber)
-        await checkVideoFilesWereRemoved(toRemove[1].uuid, server.serverNumber)
+        await checkVideoFilesWereRemoved(toRemove[0].uuid, server.internalServerNumber)
+        await checkVideoFilesWereRemoved(toRemove[1].uuid, server.internalServerNumber)
       }
     })
 
@@ -758,38 +763,36 @@ describe('Test multiple servers', function () {
 
       {
         const text = 'my super first comment'
-        await addVideoCommentThread(servers[ 0 ].url, servers[ 0 ].accessToken, videoUUID, text)
+        await addVideoCommentThread(servers[0].url, servers[0].accessToken, videoUUID, text)
       }
 
       {
         const text = 'my super second comment'
-        await addVideoCommentThread(servers[ 2 ].url, servers[ 2 ].accessToken, videoUUID, text)
+        await addVideoCommentThread(servers[2].url, servers[2].accessToken, videoUUID, text)
       }
 
       await waitJobs(servers)
 
       {
-        const res = await getVideoCommentThreads(servers[1].url, videoUUID, 0, 5)
-        const threadId = res.body.data.find(c => c.text === 'my super first comment').id
+        const threadId = await findCommentId(servers[1].url, videoUUID, 'my super first comment')
 
         const text = 'my super answer to thread 1'
-        await addVideoCommentReply(servers[ 1 ].url, servers[ 1 ].accessToken, videoUUID, threadId, text)
+        await addVideoCommentReply(servers[1].url, servers[1].accessToken, videoUUID, threadId, text)
       }
 
       await waitJobs(servers)
 
       {
-        const res1 = await getVideoCommentThreads(servers[2].url, videoUUID, 0, 5)
-        const threadId = res1.body.data.find(c => c.text === 'my super first comment').id
+        const threadId = await findCommentId(servers[2].url, videoUUID, 'my super first comment')
 
         const res2 = await getVideoThreadComments(servers[2].url, videoUUID, threadId)
         const childCommentId = res2.body.children[0].comment.id
 
         const text3 = 'my second answer to thread 1'
-        await addVideoCommentReply(servers[ 2 ].url, servers[ 2 ].accessToken, videoUUID, threadId, text3)
+        await addVideoCommentReply(servers[2].url, servers[2].accessToken, videoUUID, threadId, text3)
 
         const text2 = 'my super answer to answer of thread 1'
-        await addVideoCommentReply(servers[ 2 ].url, servers[ 2 ].accessToken, videoUUID, childCommentId, text2)
+        await addVideoCommentReply(servers[2].url, servers[2].accessToken, videoUUID, childCommentId, text2)
       }
 
       await waitJobs(servers)
@@ -868,7 +871,7 @@ describe('Test multiple servers', function () {
       await waitJobs(servers)
     })
 
-    it('Should not have this comment anymore', async function () {
+    it('Should have this comment marked as deleted', async function () {
       for (const server of servers) {
         const res1 = await getVideoCommentThreads(server.url, videoUUID, 0, 5)
         const threadId = res1.body.data.find(c => c.text === 'my super first comment').id
@@ -880,7 +883,13 @@ describe('Test multiple servers', function () {
 
         const firstChild = tree.children[0]
         expect(firstChild.comment.text).to.equal('my super answer to thread 1')
-        expect(firstChild.children).to.have.lengthOf(0)
+        expect(firstChild.children).to.have.lengthOf(1)
+
+        const deletedComment = firstChild.children[0].comment
+        expect(deletedComment.isDeleted).to.be.true
+        expect(deletedComment.deletedAt).to.not.be.null
+        expect(deletedComment.account).to.be.null
+        expect(deletedComment.text).to.equal('')
 
         const secondChild = tree.children[1]
         expect(secondChild.comment.text).to.equal('my second answer to thread 1')
@@ -890,20 +899,20 @@ describe('Test multiple servers', function () {
     it('Should delete the thread comments', async function () {
       this.timeout(10000)
 
-      const res = await getVideoCommentThreads(servers[ 0 ].url, videoUUID, 0, 5)
+      const res = await getVideoCommentThreads(servers[0].url, videoUUID, 0, 5)
       const threadId = res.body.data.find(c => c.text === 'my super first comment').id
-      await deleteVideoComment(servers[ 0 ].url, servers[ 0 ].accessToken, videoUUID, threadId)
+      await deleteVideoComment(servers[0].url, servers[0].accessToken, videoUUID, threadId)
 
       await waitJobs(servers)
     })
 
-    it('Should have the threads deleted on other servers too', async function () {
+    it('Should have the threads marked as deleted on other servers too', async function () {
       for (const server of servers) {
         const res = await getVideoCommentThreads(server.url, videoUUID, 0, 5)
 
-        expect(res.body.total).to.equal(1)
+        expect(res.body.total).to.equal(2)
         expect(res.body.data).to.be.an('array')
-        expect(res.body.data).to.have.lengthOf(1)
+        expect(res.body.data).to.have.lengthOf(2)
 
         {
           const comment: VideoComment = res.body.data[0]
@@ -915,23 +924,59 @@ describe('Test multiple servers', function () {
           expect(dateIsValid(comment.createdAt as string)).to.be.true
           expect(dateIsValid(comment.updatedAt as string)).to.be.true
         }
+
+        {
+          const deletedComment: VideoComment = res.body.data[1]
+          expect(deletedComment).to.not.be.undefined
+          expect(deletedComment.isDeleted).to.be.true
+          expect(deletedComment.deletedAt).to.not.be.null
+          expect(deletedComment.text).to.equal('')
+          expect(deletedComment.inReplyToCommentId).to.be.null
+          expect(deletedComment.account).to.be.null
+          expect(deletedComment.totalReplies).to.equal(3)
+          expect(dateIsValid(deletedComment.createdAt as string)).to.be.true
+          expect(dateIsValid(deletedComment.updatedAt as string)).to.be.true
+          expect(dateIsValid(deletedComment.deletedAt as string)).to.be.true
+        }
       }
     })
 
     it('Should delete a remote thread by the origin server', async function () {
-      const res = await getVideoCommentThreads(servers[ 0 ].url, videoUUID, 0, 5)
+      this.timeout(5000)
+
+      const res = await getVideoCommentThreads(servers[0].url, videoUUID, 0, 5)
       const threadId = res.body.data.find(c => c.text === 'my super second comment').id
-      await deleteVideoComment(servers[ 0 ].url, servers[ 0 ].accessToken, videoUUID, threadId)
+      await deleteVideoComment(servers[0].url, servers[0].accessToken, videoUUID, threadId)
 
       await waitJobs(servers)
     })
 
-    it('Should have the threads deleted on other servers too', async function () {
+    it('Should have the threads marked as deleted on other servers too', async function () {
       for (const server of servers) {
         const res = await getVideoCommentThreads(server.url, videoUUID, 0, 5)
 
-        expect(res.body.total).to.equal(0)
-        expect(res.body.data).to.have.lengthOf(0)
+        expect(res.body.total).to.equal(2)
+        expect(res.body.data).to.have.lengthOf(2)
+
+        {
+          const comment: VideoComment = res.body.data[0]
+          expect(comment.text).to.equal('')
+          expect(comment.isDeleted).to.be.true
+          expect(comment.createdAt).to.not.be.null
+          expect(comment.deletedAt).to.not.be.null
+          expect(comment.account).to.be.null
+          expect(comment.totalReplies).to.equal(0)
+        }
+
+        {
+          const comment: VideoComment = res.body.data[1]
+          expect(comment.text).to.equal('')
+          expect(comment.isDeleted).to.be.true
+          expect(comment.createdAt).to.not.be.null
+          expect(comment.deletedAt).to.not.be.null
+          expect(comment.account).to.be.null
+          expect(comment.totalReplies).to.equal(3)
+        }
       }
     })
 
@@ -975,7 +1020,7 @@ describe('Test multiple servers', function () {
       const filePath = join(__dirname, '..', '..', 'fixtures', 'video_short.webm')
 
       await req.attach('videofile', filePath)
-        .expect(200)
+               .expect(200)
 
       await waitJobs(servers)
 
@@ -1000,7 +1045,7 @@ describe('Test multiple servers', function () {
           duration: 5,
           commentsEnabled: true,
           downloadEnabled: true,
-          tags: [ ],
+          tags: [],
           privacy: VideoPrivacy.PUBLIC,
           channel: {
             displayName: 'Main root channel',

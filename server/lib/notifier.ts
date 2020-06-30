@@ -1,13 +1,22 @@
+import { getServerActor } from '@server/models/application/application'
+import { ServerBlocklistModel } from '@server/models/server/server-blocklist'
+import {
+  MUser,
+  MUserAccount,
+  MUserDefault,
+  MUserNotifSettingAccount,
+  MUserWithNotificationSetting,
+  UserNotificationModelForApi
+} from '@server/types/models/user'
+import { MVideoImportVideo } from '@server/types/models/video/video-import'
 import { UserNotificationSettingValue, UserNotificationType, UserRight } from '../../shared/models/users'
+import { VideoAbuse, VideoPrivacy, VideoState } from '../../shared/models/videos'
 import { logger } from '../helpers/logger'
-import { Emailer } from './emailer'
-import { UserNotificationModel } from '../models/account/user-notification'
-import { UserModel } from '../models/account/user'
-import { PeerTubeSocket } from './peertube-socket'
 import { CONFIG } from '../initializers/config'
-import { VideoPrivacy, VideoState } from '../../shared/models/videos'
-import * as Bluebird from 'bluebird'
 import { AccountBlocklistModel } from '../models/account/account-blocklist'
+import { UserModel } from '../models/account/user'
+import { UserNotificationModel } from '../models/account/user-notification'
+import { MAccountServer, MActorFollowFull } from '../types/models'
 import {
   MCommentOwnerVideo,
   MVideoAbuseVideo,
@@ -15,29 +24,24 @@ import {
   MVideoBlacklistLightVideo,
   MVideoBlacklistVideo,
   MVideoFullLight
-} from '../typings/models/video'
-import {
-  MUser,
-  MUserDefault,
-  MUserNotifSettingAccount,
-  MUserWithNotificationSetting,
-  UserNotificationModelForApi
-} from '@server/typings/models/user'
-import { MActorFollowFull } from '../typings/models'
-import { MVideoImportVideo } from '@server/typings/models/video/video-import'
+} from '../types/models/video'
+import { isBlockedByServerOrAccount } from './blocklist'
+import { Emailer } from './emailer'
+import { PeerTubeSocket } from './peertube-socket'
 
 class Notifier {
 
   private static instance: Notifier
 
-  private constructor () {}
+  private constructor () {
+  }
 
   notifyOnNewVideoIfNeeded (video: MVideoAccountLight): void {
     // Only notify on public and published videos which are not blacklisted
     if (video.privacy !== VideoPrivacy.PUBLIC || video.state !== VideoState.PUBLISHED || video.isBlacklisted()) return
 
     this.notifySubscribersOfNewVideo(video)
-      .catch(err => logger.error('Cannot notify subscribers of new video %s.', video.url, { err }))
+        .catch(err => logger.error('Cannot notify subscribers of new video %s.', video.url, { err }))
   }
 
   notifyOnVideoPublishedAfterTranscoding (video: MVideoFullLight): void {
@@ -61,7 +65,9 @@ class Notifier {
     if (video.ScheduleVideoUpdate || (video.waitTranscoding && video.state !== VideoState.PUBLISHED)) return
 
     this.notifyOwnedVideoHasBeenPublished(video)
-        .catch(err => logger.error('Cannot notify owner that its video %s has been published after removed from auto-blacklist.', video.url, { err })) // tslint:disable-line:max-line-length
+        .catch(err => {
+          logger.error('Cannot notify owner that its video %s has been published after removed from auto-blacklist.', video.url, { err })
+        })
   }
 
   notifyOnNewComment (comment: MCommentOwnerVideo): void {
@@ -72,19 +78,19 @@ class Notifier {
         .catch(err => logger.error('Cannot notify mentions of comment %s.', comment.url, { err }))
   }
 
-  notifyOnNewVideoAbuse (videoAbuse: MVideoAbuseVideo): void {
-    this.notifyModeratorsOfNewVideoAbuse(videoAbuse)
-      .catch(err => logger.error('Cannot notify of new video abuse of video %s.', videoAbuse.Video.url, { err }))
+  notifyOnNewVideoAbuse (parameters: { videoAbuse: VideoAbuse, videoAbuseInstance: MVideoAbuseVideo, reporter: string }): void {
+    this.notifyModeratorsOfNewVideoAbuse(parameters)
+        .catch(err => logger.error('Cannot notify of new video abuse of video %s.', parameters.videoAbuseInstance.Video.url, { err }))
   }
 
   notifyOnVideoAutoBlacklist (videoBlacklist: MVideoBlacklistLightVideo): void {
     this.notifyModeratorsOfVideoAutoBlacklist(videoBlacklist)
-      .catch(err => logger.error('Cannot notify of auto-blacklist of video %s.', videoBlacklist.Video.url, { err }))
+        .catch(err => logger.error('Cannot notify of auto-blacklist of video %s.', videoBlacklist.Video.url, { err }))
   }
 
   notifyOnVideoBlacklist (videoBlacklist: MVideoBlacklistVideo): void {
     this.notifyVideoOwnerOfBlacklist(videoBlacklist)
-      .catch(err => logger.error('Cannot notify video owner of new video blacklist of %s.', videoBlacklist.Video.url, { err }))
+        .catch(err => logger.error('Cannot notify video owner of new video blacklist of %s.', videoBlacklist.Video.url, { err }))
   }
 
   notifyOnVideoUnblacklist (video: MVideoFullLight): void {
@@ -94,7 +100,7 @@ class Notifier {
 
   notifyOnFinishedVideoImport (videoImport: MVideoImportVideo, success: boolean): void {
     this.notifyOwnerVideoImportIsFinished(videoImport, success)
-      .catch(err => logger.error('Cannot notify owner that its video import %s is finished.', videoImport.getTargetIdentifier(), { err }))
+        .catch(err => logger.error('Cannot notify owner that its video import %s is finished.', videoImport.getTargetIdentifier(), { err }))
   }
 
   notifyOnNewUserRegistration (user: MUserDefault): void {
@@ -104,14 +110,14 @@ class Notifier {
 
   notifyOfNewUserFollow (actorFollow: MActorFollowFull): void {
     this.notifyUserOfNewActorFollow(actorFollow)
-      .catch(err => {
-        logger.error(
-          'Cannot notify owner of channel %s of a new follow by %s.',
-          actorFollow.ActorFollowing.VideoChannel.getDisplayName(),
-          actorFollow.ActorFollower.Account.getDisplayName(),
-          { err }
-        )
-      })
+        .catch(err => {
+          logger.error(
+            'Cannot notify owner of channel %s of a new follow by %s.',
+            actorFollow.ActorFollowing.VideoChannel.getDisplayName(),
+            actorFollow.ActorFollower.Account.getDisplayName(),
+            { err }
+          )
+        })
   }
 
   notifyOfNewInstanceFollow (actorFollow: MActorFollowFull): void {
@@ -164,8 +170,7 @@ class Notifier {
     // Not our user or user comments its own video
     if (!user || comment.Account.userId === user.id) return
 
-    const accountMuted = await AccountBlocklistModel.isAccountMutedBy(user.Account.id, comment.accountId)
-    if (accountMuted) return
+    if (await this.isBlockedByServerOrUser(comment.Account, user)) return
 
     logger.info('Notifying user %s of new comment %s.', user.username, comment.url)
 
@@ -210,12 +215,22 @@ class Notifier {
 
     if (users.length === 0) return
 
-    const accountMutedHash = await AccountBlocklistModel.isAccountMutedByMulti(users.map(u => u.Account.id), comment.accountId)
+    const serverAccountId = (await getServerActor()).Account.id
+    const sourceAccounts = users.map(u => u.Account.id).concat([ serverAccountId ])
+
+    const accountMutedHash = await AccountBlocklistModel.isAccountMutedByMulti(sourceAccounts, comment.accountId)
+    const instanceMutedHash = await ServerBlocklistModel.isServerMutedByMulti(sourceAccounts, comment.Account.Actor.serverId)
 
     logger.info('Notifying %d users of new comment %s.', users.length, comment.url)
 
     function settingGetter (user: MUserNotifSettingAccount) {
-      if (accountMutedHash[user.Account.id] === true) return UserNotificationSettingValue.NONE
+      const accountId = user.Account.id
+      if (
+        accountMutedHash[accountId] === true || instanceMutedHash[accountId] === true ||
+        accountMutedHash[serverAccountId] === true || instanceMutedHash[serverAccountId] === true
+      ) {
+        return UserNotificationSettingValue.NONE
+      }
 
       return user.NotificationSetting.commentMention
     }
@@ -254,9 +269,9 @@ class Notifier {
     if (!user) return
 
     const followerAccount = actorFollow.ActorFollower.Account
+    const followerAccountWithActor = Object.assign(followerAccount, { Actor: actorFollow.ActorFollower })
 
-    const accountMuted = await AccountBlocklistModel.isAccountMutedBy(user.Account.id, followerAccount.id)
-    if (accountMuted) return
+    if (await this.isBlockedByServerOrUser(followerAccountWithActor, user)) return
 
     logger.info('Notifying user %s of new follower: %s.', user.username, followerAccount.getDisplayName())
 
@@ -284,6 +299,9 @@ class Notifier {
 
   private async notifyAdminsOfNewInstanceFollow (actorFollow: MActorFollowFull) {
     const admins = await UserModel.listWithRight(UserRight.MANAGE_SERVER_FOLLOW)
+
+    const follower = Object.assign(actorFollow.ActorFollower.Account, { Actor: actorFollow.ActorFollower })
+    if (await this.isBlockedByServerOrUser(follower)) return
 
     logger.info('Notifying %d administrators of new instance follower: %s.', admins.length, actorFollow.ActorFollower.url)
 
@@ -336,11 +354,15 @@ class Notifier {
     return this.notify({ users: admins, settingGetter, notificationCreator, emailSender })
   }
 
-  private async notifyModeratorsOfNewVideoAbuse (videoAbuse: MVideoAbuseVideo) {
+  private async notifyModeratorsOfNewVideoAbuse (parameters: {
+    videoAbuse: VideoAbuse
+    videoAbuseInstance: MVideoAbuseVideo
+    reporter: string
+  }) {
     const moderators = await UserModel.listWithRight(UserRight.MANAGE_VIDEO_ABUSES)
     if (moderators.length === 0) return
 
-    logger.info('Notifying %s user/moderators of new video abuse %s.', moderators.length, videoAbuse.Video.url)
+    logger.info('Notifying %s user/moderators of new video abuse %s.', moderators.length, parameters.videoAbuseInstance.Video.url)
 
     function settingGetter (user: MUserWithNotificationSetting) {
       return user.NotificationSetting.videoAbuseAsModerator
@@ -350,15 +372,15 @@ class Notifier {
       const notification: UserNotificationModelForApi = await UserNotificationModel.create<UserNotificationModelForApi>({
         type: UserNotificationType.NEW_VIDEO_ABUSE_FOR_MODERATORS,
         userId: user.id,
-        videoAbuseId: videoAbuse.id
+        videoAbuseId: parameters.videoAbuse.id
       })
-      notification.VideoAbuse = videoAbuse
+      notification.VideoAbuse = parameters.videoAbuseInstance
 
       return notification
     }
 
     function emailSender (emails: string[]) {
-      return Emailer.Instance.addVideoAbuseModeratorsNotification(emails, videoAbuse)
+      return Emailer.Instance.addVideoAbuseModeratorsNotification(emails, parameters)
     }
 
     return this.notify({ users: moderators, settingGetter, notificationCreator, emailSender })
@@ -537,10 +559,10 @@ class Notifier {
     return this.notify({ users: moderators, settingGetter, notificationCreator, emailSender })
   }
 
-  private async notify <T extends MUserWithNotificationSetting> (options: {
-    users: T[],
-    notificationCreator: (user: T) => Promise<UserNotificationModelForApi>,
-    emailSender: (emails: string[]) => Promise<any> | Bluebird<any>,
+  private async notify<T extends MUserWithNotificationSetting> (options: {
+    users: T[]
+    notificationCreator: (user: T) => Promise<UserNotificationModelForApi>
+    emailSender: (emails: string[]) => void
     settingGetter: (user: T) => UserNotificationSettingValue
   }) {
     const emails: string[] = []
@@ -558,7 +580,7 @@ class Notifier {
     }
 
     if (emails.length !== 0) {
-      await options.emailSender(emails)
+      options.emailSender(emails)
     }
   }
 
@@ -570,6 +592,10 @@ class Notifier {
 
   private isWebNotificationEnabled (value: UserNotificationSettingValue) {
     return value & UserNotificationSettingValue.WEB
+  }
+
+  private isBlockedByServerOrUser (targetAccount: MAccountServer, user?: MUserAccount) {
+    return isBlockedByServerOrAccount(targetAccount, user?.Account)
   }
 
   static get Instance () {

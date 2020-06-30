@@ -1,15 +1,15 @@
 import { Transaction } from 'sequelize'
+import { getServerActor } from '@server/models/application/application'
 import { ActivityAudience, ActivityDelete } from '../../../../shared/models/activitypub'
+import { logger } from '../../../helpers/logger'
 import { ActorModel } from '../../../models/activitypub/actor'
 import { VideoCommentModel } from '../../../models/video/video-comment'
 import { VideoShareModel } from '../../../models/video/video-share'
+import { MActorUrl } from '../../../types/models'
+import { MCommentOwnerVideo, MVideoAccountLight, MVideoPlaylistFullSummary } from '../../../types/models/video'
+import { audiencify, getActorsInvolvedInVideo, getVideoCommentAudience } from '../audience'
 import { getDeleteActivityPubUrl } from '../url'
 import { broadcastToActors, broadcastToFollowers, sendVideoRelatedActivity, unicastTo } from './utils'
-import { audiencify, getActorsInvolvedInVideo, getVideoCommentAudience } from '../audience'
-import { logger } from '../../../helpers/logger'
-import { getServerActor } from '../../../helpers/utils'
-import { MCommentOwnerVideoReply, MVideoAccountLight, MVideoPlaylistFullSummary } from '../../../typings/models/video'
-import { MActorUrl } from '../../../typings/models'
 
 async function sendDeleteVideo (video: MVideoAccountLight, transaction: Transaction) {
   logger.info('Creating job to broadcast delete of video %s.', video.url)
@@ -42,7 +42,7 @@ async function sendDeleteActor (byActor: ActorModel, t: Transaction) {
   return broadcastToFollowers(activity, byActor, actorsInvolved, t)
 }
 
-async function sendDeleteVideoComment (videoComment: MCommentOwnerVideoReply, t: Transaction) {
+async function sendDeleteVideoComment (videoComment: MCommentOwnerVideo, t: Transaction) {
   logger.info('Creating job to send delete of comment %s.', videoComment.url)
 
   const isVideoOrigin = videoComment.Video.isOwned()
@@ -53,16 +53,17 @@ async function sendDeleteVideoComment (videoComment: MCommentOwnerVideoReply, t:
     : videoComment.Video.VideoChannel.Account.Actor
 
   const threadParentComments = await VideoCommentModel.listThreadParentComments(videoComment, t)
+  const threadParentCommentsFiltered = threadParentComments.filter(c => !c.isDeleted())
 
   const actorsInvolvedInComment = await getActorsInvolvedInVideo(videoComment.Video, t)
   actorsInvolvedInComment.push(byActor) // Add the actor that commented the video
 
-  const audience = getVideoCommentAudience(videoComment, threadParentComments, actorsInvolvedInComment, isVideoOrigin)
+  const audience = getVideoCommentAudience(videoComment, threadParentCommentsFiltered, actorsInvolvedInComment, isVideoOrigin)
   const activity = buildDeleteActivity(url, videoComment.url, byActor, audience)
 
   // This was a reply, send it to the parent actors
   const actorsException = [ byActor ]
-  await broadcastToActors(activity, byActor, threadParentComments.map(c => c.Account.Actor), t, actorsException)
+  await broadcastToActors(activity, byActor, threadParentCommentsFiltered.map(c => c.Account.Actor), t, actorsException)
 
   // Broadcast to our followers
   await broadcastToFollowers(activity, byActor, [ byActor ], t)

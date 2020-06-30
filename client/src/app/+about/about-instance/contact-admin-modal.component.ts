@@ -1,11 +1,11 @@
 import { Component, OnInit, ViewChild } from '@angular/core'
 import { Notifier, ServerService } from '@app/core'
-import { I18n } from '@ngx-translate/i18n-polyfill'
-import { FormValidatorService } from '@app/shared/forms/form-validators/form-validator.service'
+import { FormReactive, FormValidatorService, InstanceValidatorsService } from '@app/shared/shared-forms'
+import { InstanceService } from '@app/shared/shared-instance'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
 import { NgbModalRef } from '@ng-bootstrap/ng-bootstrap/modal/modal-ref'
-import { FormReactive, InstanceValidatorsService } from '@app/shared'
-import { InstanceService } from '@app/shared/instance/instance.service'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { ServerConfig } from '@shared/models'
 
 @Component({
   selector: 'my-contact-admin-modal',
@@ -18,6 +18,7 @@ export class ContactAdminModalComponent extends FormReactive implements OnInit {
   error: string
 
   private openedModal: NgbModalRef
+  private serverConfig: ServerConfig
 
   constructor (
     protected formValidatorService: FormValidatorService,
@@ -32,10 +33,14 @@ export class ContactAdminModalComponent extends FormReactive implements OnInit {
   }
 
   get instanceName () {
-    return this.serverService.getConfig().instance.name
+    return this.serverConfig.instance.name
   }
 
   ngOnInit () {
+    this.serverConfig = this.serverService.getTmpConfig()
+    this.serverService.getConfig()
+        .subscribe(config => this.serverConfig = config)
+
     this.buildForm({
       fromName: this.instanceValidatorsService.FROM_NAME,
       fromEmail: this.instanceValidatorsService.FROM_EMAIL,
@@ -45,7 +50,7 @@ export class ContactAdminModalComponent extends FormReactive implements OnInit {
   }
 
   show () {
-    this.openedModal = this.modalService.open(this.modal, { keyboard: false })
+    this.openedModal = this.modalService.open(this.modal, { centered: true, keyboard: false })
   }
 
   hide () {

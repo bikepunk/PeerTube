@@ -4,7 +4,7 @@ import { ActivityPubActorType } from '../../shared/models/activitypub'
 import { FollowState } from '../../shared/models/actors'
 import { VideoAbuseState, VideoImportState, VideoPrivacy, VideoTranscodingFPS } from '../../shared/models/videos'
 // Do not use barrels, remain constants as independent as possible
-import { isTestInstance, sanitizeHost, sanitizeUrl, root, parseDurationToMs } from '../helpers/core-utils'
+import { isTestInstance, sanitizeHost, sanitizeUrl, root } from '../helpers/core-utils'
 import { NSFWPolicyType } from '../../shared/models/videos/nsfw-policy.type'
 import { invert } from 'lodash'
 import { CronRepeatOptions, EveryRepeatOptions } from 'bull'
@@ -14,7 +14,7 @@ import { CONFIG, registerConfigChangedHandler } from './config'
 
 // ---------------------------------------------------------------------------
 
-const LAST_MIGRATION_VERSION = 450
+const LAST_MIGRATION_VERSION = 515
 
 // ---------------------------------------------------------------------------
 
@@ -22,9 +22,16 @@ const API_VERSION = 'v1'
 const PEERTUBE_VERSION = require(join(root(), 'package.json')).version
 
 const PAGINATION = {
-  COUNT: {
-    DEFAULT: 15,
-    MAX: 100
+  GLOBAL: {
+    COUNT: {
+      DEFAULT: 15,
+      MAX: 100
+    }
+  },
+  OUTBOX: {
+    COUNT: {
+      MAX: 50
+    }
   }
 }
 
@@ -46,15 +53,16 @@ const SORTABLE_COLUMNS = {
   VIDEO_ABUSES: [ 'id', 'createdAt', 'state' ],
   VIDEO_CHANNELS: [ 'id', 'name', 'updatedAt', 'createdAt' ],
   VIDEO_IMPORTS: [ 'createdAt' ],
-  VIDEO_COMMENT_THREADS: [ 'createdAt' ],
+  VIDEO_COMMENT_THREADS: [ 'createdAt', 'totalReplies' ],
   VIDEO_RATES: [ 'createdAt' ],
   BLACKLISTS: [ 'id', 'name', 'duration', 'views', 'likes', 'dislikes', 'uuid', 'createdAt' ],
   FOLLOWERS: [ 'createdAt', 'state', 'score' ],
   FOLLOWING: [ 'createdAt', 'redundancyAllowed', 'state' ],
 
-  VIDEOS: [ 'name', 'duration', 'createdAt', 'publishedAt', 'views', 'likes', 'trending' ],
+  VIDEOS: [ 'name', 'duration', 'createdAt', 'publishedAt', 'originallyPublishedAt', 'views', 'likes', 'trending' ],
 
-  VIDEOS_SEARCH: [ 'name', 'duration', 'createdAt', 'publishedAt', 'views', 'likes', 'match' ],
+  // Don't forget to update peertube-search-index with the same values
+  VIDEOS_SEARCH: [ 'name', 'duration', 'createdAt', 'publishedAt', 'originallyPublishedAt', 'views', 'likes', 'match' ],
   VIDEO_CHANNELS_SEARCH: [ 'match', 'displayName', 'createdAt' ],
 
   ACCOUNTS_BLOCKLIST: [ 'createdAt' ],
@@ -66,7 +74,9 @@ const SORTABLE_COLUMNS = {
 
   PLUGINS: [ 'name', 'createdAt', 'updatedAt' ],
 
-  AVAILABLE_PLUGINS: [ 'npmName', 'popularity' ]
+  AVAILABLE_PLUGINS: [ 'npmName', 'popularity' ],
+
+  VIDEO_REDUNDANCIES: [ 'name' ]
 }
 
 const OAUTH_LIFETIME = {
@@ -81,9 +91,6 @@ const ROUTE_CACHE_LIFETIME = {
   SECURITYTXT: '2 hours',
   NODEINFO: '10 minutes',
   DNT_POLICY: '1 week',
-  OVERVIEWS: {
-    VIDEOS: '1 hour'
-  },
   ACTIVITY_PUB: {
     VIDEOS: '1 second' // 1 second, cache concurrent requests after a broadcast for example
   },
@@ -110,45 +117,44 @@ const REMOTE_SCHEME = {
   WS: 'wss'
 }
 
-// TODO: remove 'video-file'
-const JOB_ATTEMPTS: { [id in (JobType | 'video-file')]: number } = {
+const JOB_ATTEMPTS: { [id in JobType]: number } = {
   'activitypub-http-broadcast': 5,
   'activitypub-http-unicast': 5,
   'activitypub-http-fetcher': 5,
   'activitypub-follow': 5,
   'video-file-import': 1,
   'video-transcoding': 1,
-  'video-file': 1,
   'video-import': 1,
   'email': 5,
   'videos-views': 1,
-  'activitypub-refresher': 1
+  'activitypub-refresher': 1,
+  'video-redundancy': 1
 }
-const JOB_CONCURRENCY: { [id in (JobType | 'video-file')]: number } = {
+const JOB_CONCURRENCY: { [id in JobType]: number } = {
   'activitypub-http-broadcast': 1,
   'activitypub-http-unicast': 5,
   'activitypub-http-fetcher': 1,
-  'activitypub-follow': 3,
+  'activitypub-follow': 1,
   'video-file-import': 1,
   'video-transcoding': 1,
-  'video-file': 1,
   'video-import': 1,
   'email': 5,
   'videos-views': 1,
-  'activitypub-refresher': 1
+  'activitypub-refresher': 1,
+  'video-redundancy': 1
 }
-const JOB_TTL: { [id in (JobType | 'video-file')]: number } = {
+const JOB_TTL: { [id in JobType]: number } = {
   'activitypub-http-broadcast': 60000 * 10, // 10 minutes
   'activitypub-http-unicast': 60000 * 10, // 10 minutes
-  'activitypub-http-fetcher': 60000 * 10, // 10 minutes
+  'activitypub-http-fetcher': 1000 * 3600 * 10, // 10 hours
   'activitypub-follow': 60000 * 10, // 10 minutes
   'video-file-import': 1000 * 3600, // 1 hour
   'video-transcoding': 1000 * 3600 * 48, // 2 days, transcoding could be long
-  'video-file': 1000 * 3600 * 48, // 2 days, transcoding could be long
-  'video-import': 1000 * 3600 * 2, //  hours
+  'video-import': 1000 * 3600 * 2, // 2 hours
   'email': 60000 * 10, // 10 minutes
   'videos-views': undefined, // Unlimited
-  'activitypub-refresher': 60000 * 10 // 10 minutes
+  'activitypub-refresher': 60000 * 10, // 10 minutes
+  'video-redundancy': 1000 * 3600 * 3 // 3 hours
 }
 const REPEAT_JOBS: { [ id: string ]: EveryRepeatOptions | CronRepeatOptions } = {
   'videos-views': {
@@ -171,10 +177,6 @@ const SCHEDULER_INTERVALS_MS = {
   autoFollowIndexInstances: 60000 * 60 * 24, // 1 day
   removeOldViews: 60000 * 60 * 24, // 1 day
   removeOldHistory: 60000 * 60 * 24 // 1 day
-}
-
-const INSTANCES_INDEX = {
-  HOSTS_PATH: '/api/v1/instances/hosts'
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +280,7 @@ const CONSTRAINTS_FIELDS = {
     COUNT: { min: 0 }
   },
   VIDEO_COMMENTS: {
-    TEXT: { min: 1, max: 3000 }, // Length
+    TEXT: { min: 1, max: 10000 }, // Length
     URL: { min: 3, max: 2000 } // Length
   },
   VIDEO_SHARE: {
@@ -291,6 +293,9 @@ const CONSTRAINTS_FIELDS = {
   PLUGINS: {
     NAME: { min: 1, max: 214 }, // Length
     DESCRIPTION: { min: 1, max: 20000 } // Length
+  },
+  COMMONS: {
+    URL: { min: 5, max: 2000 } // Length
   }
 }
 
@@ -299,6 +304,8 @@ let CONTACT_FORM_LIFETIME = 60000 * 60 // 1 hour
 
 const VIDEO_TRANSCODING_FPS: VideoTranscodingFPS = {
   MIN: 10,
+  STANDARD: [ 24, 25, 30 ],
+  HD_STANDARD: [ 50, 60 ],
   AVERAGE: 30,
   MAX: 60,
   KEEP_ORIGIN_FPS_RESOLUTION_MIN: 720 // We keep the original FPS on high resolutions (720 minimum)
@@ -348,41 +355,43 @@ const VIDEO_LICENCES = {
   7: 'Public Domain Dedication'
 }
 
-let VIDEO_LANGUAGES: { [id: string]: string } = {}
+const VIDEO_LANGUAGES: { [id: string]: string } = {}
 
 const VIDEO_PRIVACIES = {
-  [ VideoPrivacy.PUBLIC ]: 'Public',
-  [ VideoPrivacy.UNLISTED ]: 'Unlisted',
-  [ VideoPrivacy.PRIVATE ]: 'Private'
+  [VideoPrivacy.PUBLIC]: 'Public',
+  [VideoPrivacy.UNLISTED]: 'Unlisted',
+  [VideoPrivacy.PRIVATE]: 'Private',
+  [VideoPrivacy.INTERNAL]: 'Internal'
 }
 
 const VIDEO_STATES = {
-  [ VideoState.PUBLISHED ]: 'Published',
-  [ VideoState.TO_TRANSCODE ]: 'To transcode',
-  [ VideoState.TO_IMPORT ]: 'To import'
+  [VideoState.PUBLISHED]: 'Published',
+  [VideoState.TO_TRANSCODE]: 'To transcode',
+  [VideoState.TO_IMPORT]: 'To import'
 }
 
 const VIDEO_IMPORT_STATES = {
-  [ VideoImportState.FAILED ]: 'Failed',
-  [ VideoImportState.PENDING ]: 'Pending',
-  [ VideoImportState.SUCCESS ]: 'Success'
+  [VideoImportState.FAILED]: 'Failed',
+  [VideoImportState.PENDING]: 'Pending',
+  [VideoImportState.SUCCESS]: 'Success',
+  [VideoImportState.REJECTED]: 'Rejected'
 }
 
 const VIDEO_ABUSE_STATES = {
-  [ VideoAbuseState.PENDING ]: 'Pending',
-  [ VideoAbuseState.REJECTED ]: 'Rejected',
-  [ VideoAbuseState.ACCEPTED ]: 'Accepted'
+  [VideoAbuseState.PENDING]: 'Pending',
+  [VideoAbuseState.REJECTED]: 'Rejected',
+  [VideoAbuseState.ACCEPTED]: 'Accepted'
 }
 
 const VIDEO_PLAYLIST_PRIVACIES = {
-  [ VideoPlaylistPrivacy.PUBLIC ]: 'Public',
-  [ VideoPlaylistPrivacy.UNLISTED ]: 'Unlisted',
-  [ VideoPlaylistPrivacy.PRIVATE ]: 'Private'
+  [VideoPlaylistPrivacy.PUBLIC]: 'Public',
+  [VideoPlaylistPrivacy.UNLISTED]: 'Unlisted',
+  [VideoPlaylistPrivacy.PRIVATE]: 'Private'
 }
 
 const VIDEO_PLAYLIST_TYPES = {
-  [ VideoPlaylistType.REGULAR ]: 'Regular',
-  [ VideoPlaylistType.WATCH_LATER ]: 'Watch later'
+  [VideoPlaylistType.REGULAR]: 'Regular',
+  [VideoPlaylistType.WATCH_LATER]: 'Watch later'
 }
 
 const MIMETYPES = {
@@ -392,6 +401,9 @@ const MIMETYPES = {
       'audio/mp3': '.mp3',
       'application/ogg': '.ogg',
       'audio/ogg': '.ogg',
+      'audio/x-ms-wma': '.wma',
+      'audio/wav': '.wav',
+      'audio/x-flac': '.flac',
       'audio/flac': '.flac'
     },
     EXT_MIMETYPE: null as { [ id: string ]: string }
@@ -405,7 +417,8 @@ const MIMETYPES = {
       'image/png': '.png',
       'image/jpg': '.jpg',
       'image/jpeg': '.jpg'
-    }
+    },
+    EXT_MIMETYPE: null as { [ id: string ]: string }
   },
   VIDEO_CAPTIONS: {
     MIMETYPE_EXT: {
@@ -421,13 +434,14 @@ const MIMETYPES = {
   }
 }
 MIMETYPES.AUDIO.EXT_MIMETYPE = invert(MIMETYPES.AUDIO.MIMETYPE_EXT)
+MIMETYPES.IMAGE.EXT_MIMETYPE = invert(MIMETYPES.IMAGE.MIMETYPE_EXT)
 
 // ---------------------------------------------------------------------------
 
 const OVERVIEWS = {
   VIDEOS: {
     SAMPLE_THRESHOLD: 6,
-    SAMPLES_COUNT: 2
+    SAMPLES_COUNT: 20
   }
 }
 
@@ -448,7 +462,7 @@ const ACTIVITY_PUB = {
   ACCEPT_HEADER: 'application/activity+json, application/ld+json',
   PUBLIC: 'https://www.w3.org/ns/activitystreams#Public',
   COLLECTION_ITEMS_PER_PAGE: 10,
-  FETCH_PAGE_LIMIT: 100,
+  FETCH_PAGE_LIMIT: 2000,
   URL_MIME_TYPES: {
     VIDEO: [] as string[],
     TORRENT: [ 'application/x-bittorrent' ],
@@ -482,7 +496,8 @@ let PRIVATE_RSA_KEY_SIZE = 2048
 // Password encryption
 const BCRYPT_SALT_SIZE = 10
 
-const USER_PASSWORD_RESET_LIFETIME = 60000 * 5 // 5 minutes
+const USER_PASSWORD_RESET_LIFETIME = 60000 * 60 // 60 minutes
+const USER_PASSWORD_CREATE_LIFETIME = 60000 * 60 * 24 * 7 // 7 days
 
 const USER_EMAIL_VERIFY_LIFETIME = 60000 * 60 // 60 minutes
 
@@ -519,7 +534,7 @@ const LAZY_STATIC_PATHS = {
 }
 
 // Cache control
-let STATIC_MAX_AGE = {
+const STATIC_MAX_AGE = {
   SERVER: '2h',
   CLIENT: '30d'
 }
@@ -527,11 +542,13 @@ let STATIC_MAX_AGE = {
 // Videos thumbnail size
 const THUMBNAILS_SIZE = {
   width: 223,
-  height: 122
+  height: 122,
+  minWidth: 150
 }
 const PREVIEWS_SIZE = {
   width: 850,
-  height: 480
+  height: 480,
+  minWidth: 400
 }
 const AVATARS_SIZE = {
   width: 120,
@@ -568,7 +585,12 @@ const HLS_STREAMING_PLAYLIST_DIRECTORY = join(CONFIG.STORAGE.STREAMING_PLAYLISTS
 const HLS_REDUNDANCY_DIRECTORY = join(CONFIG.STORAGE.REDUNDANCY_DIR, 'hls')
 
 const MEMOIZE_TTL = {
-  OVERVIEWS_SAMPLE: 1000 * 3600 * 4 // 4 hours
+  OVERVIEWS_SAMPLE: 1000 * 3600 * 4, // 4 hours
+  INFO_HASH_EXISTS: 1000 * 3600 * 12 // 12 hours
+}
+
+const MEMOIZE_LENGTH = {
+  INFO_HASH_EXISTS: 200
 }
 
 const QUEUE_CONCURRENCY = {
@@ -603,13 +625,16 @@ const FEEDS = {
 }
 
 const MAX_LOGS_OUTPUT_CHARACTERS = 10 * 1000 * 1000
+const LOG_FILENAME = 'peertube.log'
+const AUDIT_LOG_FILENAME = 'peertube-audit.log'
 
 // ---------------------------------------------------------------------------
 
 const TRACKER_RATE_LIMITS = {
   INTERVAL: 60000 * 5, // 5 minutes
   ANNOUNCES_PER_IP_PER_INFOHASH: 15, // maximum announces per torrent in the interval
-  ANNOUNCES_PER_IP: 30 // maximum announces for all our torrents in the interval
+  ANNOUNCES_PER_IP: 30, // maximum announces for all our torrents in the interval
+  BLOCK_IP_LIFETIME: 60000 * 10 // 10 minutes
 }
 
 const P2P_MEDIA_LOADER_PEER_VERSION = 2
@@ -619,8 +644,19 @@ const P2P_MEDIA_LOADER_PEER_VERSION = 2
 const PLUGIN_GLOBAL_CSS_FILE_NAME = 'plugins-global.css'
 const PLUGIN_GLOBAL_CSS_PATH = join(CONFIG.STORAGE.TMP_DIR, PLUGIN_GLOBAL_CSS_FILE_NAME)
 
+let PLUGIN_EXTERNAL_AUTH_TOKEN_LIFETIME = 1000 * 60 * 5 // 5 minutes
+
 const DEFAULT_THEME_NAME = 'default'
 const DEFAULT_USER_THEME_NAME = 'instance-default'
+
+// ---------------------------------------------------------------------------
+
+const SEARCH_INDEX = {
+  ROUTES: {
+    VIDEOS: '/api/v1/search/videos',
+    VIDEO_CHANNELS: '/api/v1/search/video-channels'
+  }
+}
 
 // ---------------------------------------------------------------------------
 
@@ -648,18 +684,20 @@ if (isTestInstance() === true) {
   SCHEDULER_INTERVALS_MS.removeOldViews = 5000
   SCHEDULER_INTERVALS_MS.updateVideos = 5000
   SCHEDULER_INTERVALS_MS.autoFollowIndexInstances = 5000
-  REPEAT_JOBS[ 'videos-views' ] = { every: 5000 }
+  REPEAT_JOBS['videos-views'] = { every: 5000 }
 
   REDUNDANCY.VIDEOS.RANDOMIZED_FACTOR = 1
 
   VIDEO_VIEW_LIFETIME = 1000 // 1 second
   CONTACT_FORM_LIFETIME = 1000 // 1 second
 
-  JOB_ATTEMPTS[ 'email' ] = 1
+  JOB_ATTEMPTS['email'] = 1
 
   FILES_CACHE.VIDEO_CAPTIONS.MAX_AGE = 3000
-  MEMOIZE_TTL.OVERVIEWS_SAMPLE = 1
-  ROUTE_CACHE_LIFETIME.OVERVIEWS.VIDEOS = '0ms'
+  MEMOIZE_TTL.OVERVIEWS_SAMPLE = 3000
+  OVERVIEWS.VIDEOS.SAMPLE_THRESHOLD = 2
+
+  PLUGIN_EXTERNAL_AUTH_TOKEN_LIFETIME = 5000
 }
 
 updateWebserverUrls()
@@ -677,6 +715,7 @@ export {
   API_VERSION,
   PEERTUBE_VERSION,
   LAZY_STATIC_PATHS,
+  SEARCH_INDEX,
   HLS_REDUNDANCY_DIRECTORY,
   P2P_MEDIA_LOADER_PEER_VERSION,
   AVATARS_SIZE,
@@ -684,6 +723,7 @@ export {
   BCRYPT_SALT_SIZE,
   TRACKER_RATE_LIMITS,
   FILES_CACHE,
+  LOG_FILENAME,
   CONSTRAINTS_FIELDS,
   EMBED_SIZE,
   REDUNDANCY,
@@ -693,12 +733,12 @@ export {
   OAUTH_LIFETIME,
   CUSTOM_HTML_TAG_COMMENTS,
   BROADCAST_CONCURRENCY,
+  AUDIT_LOG_FILENAME,
   PAGINATION,
   ACTOR_FOLLOW_SCORE,
   PREVIEWS_SIZE,
   REMOTE_SCHEME,
   FOLLOW_STATES,
-  INSTANCES_INDEX,
   DEFAULT_USER_THEME_NAME,
   SERVER_ACTOR_NAME,
   PLUGIN_GLOBAL_CSS_FILE_NAME,
@@ -720,6 +760,7 @@ export {
   ACTIVITY_PUB_ACTOR_TYPES,
   THUMBNAILS_SIZE,
   VIDEO_CATEGORIES,
+  MEMOIZE_LENGTH,
   VIDEO_LANGUAGES,
   VIDEO_PRIVACIES,
   VIDEO_LICENCES,
@@ -733,6 +774,7 @@ export {
   LRU_CACHE,
   JOB_REQUEST_TIMEOUT,
   USER_PASSWORD_RESET_LIFETIME,
+  USER_PASSWORD_CREATE_LIFETIME,
   MEMOIZE_TTL,
   USER_EMAIL_VERIFY_LIFETIME,
   OVERVIEWS,
@@ -748,6 +790,7 @@ export {
   VIDEO_VIEW_LIFETIME,
   CONTACT_FORM_LIFETIME,
   VIDEO_PLAYLIST_PRIVACIES,
+  PLUGIN_EXTERNAL_AUTH_TOKEN_LIFETIME,
   ASSETS_PATH,
   loadLanguages,
   buildLanguages
@@ -769,8 +812,11 @@ function buildVideoMimetypeExt () {
         'video/x-msvideo': '.avi',
         'video/x-flv': '.flv',
         'video/x-matroska': '.mkv',
-        'application/octet-stream': '.mkv',
-        'video/avi': '.avi'
+        'video/avi': '.avi',
+        'video/x-m4v': '.m4v',
+        // Could be anything
+        'application/octet-stream': null,
+        'video/m4v': '.m4v'
       })
     }
 
@@ -810,42 +856,42 @@ function loadLanguages () {
 function buildLanguages () {
   const iso639 = require('iso-639-3')
 
-  const languages: { [ id: string ]: string } = {}
+  const languages: { [id: string]: string } = {}
 
   const additionalLanguages = {
-    'sgn': true, // Sign languages (macro language)
-    'ase': true, // American sign language
-    'sdl': true, // Arabian sign language
-    'bfi': true, // British sign language
-    'bzs': true, // Brazilian sign language
-    'csl': true, // Chinese sign language
-    'cse': true, // Czech sign language
-    'dsl': true, // Danish sign language
-    'fsl': true, // French sign language
-    'gsg': true, // German sign language
-    'pks': true, // Pakistan sign language
-    'jsl': true, // Japanese sign language
-    'sfs': true, // South African sign language
-    'swl': true, // Swedish sign language
-    'rsl': true, // Russian sign language: true
+    sgn: true, // Sign languages (macro language)
+    ase: true, // American sign language
+    sdl: true, // Arabian sign language
+    bfi: true, // British sign language
+    bzs: true, // Brazilian sign language
+    csl: true, // Chinese sign language
+    cse: true, // Czech sign language
+    dsl: true, // Danish sign language
+    fsl: true, // French sign language
+    gsg: true, // German sign language
+    pks: true, // Pakistan sign language
+    jsl: true, // Japanese sign language
+    sfs: true, // South African sign language
+    swl: true, // Swedish sign language
+    rsl: true, // Russian sign language: true
 
-    'epo': true, // Esperanto
-    'tlh': true, // Klingon
-    'jbo': true, // Lojban
-    'avk': true // Kotava
+    epo: true, // Esperanto
+    tlh: true, // Klingon
+    jbo: true, // Lojban
+    avk: true // Kotava
   }
 
   // Only add ISO639-1 languages and some sign languages (ISO639-3)
   iso639
     .filter(l => {
-      return (l.iso6391 !== null && l.type === 'living') ||
-        additionalLanguages[ l.iso6393 ] === true
+      return (l.iso6391 !== undefined && l.type === 'living') ||
+        additionalLanguages[l.iso6393] === true
     })
-    .forEach(l => languages[ l.iso6391 || l.iso6393 ] = l.name)
+    .forEach(l => { languages[l.iso6391 || l.iso6393] = l.name })
 
   // Override Occitan label
-  languages[ 'oc' ] = 'Occitan'
-  languages[ 'el' ] = 'Greek'
+  languages['oc'] = 'Occitan'
+  languages['el'] = 'Greek'
 
   return languages
 }

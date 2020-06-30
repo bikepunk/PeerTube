@@ -1,25 +1,33 @@
-import { Inject, Injectable, LOCALE_ID, NgZone } from '@angular/core'
-import { Router } from '@angular/router'
-import { getCompleteLocale, isDefaultLocale, peertubeTranslate, ServerConfigPlugin } from '@shared/models'
-import { ServerService } from '@app/core/server/server.service'
-import { ClientScript } from '@shared/models/plugins/plugin-package-json.model'
-import { ClientScript as ClientScriptModule } from '../../../types/client-script.model'
-import { environment } from '../../../environments/environment'
 import { Observable, of, ReplaySubject } from 'rxjs'
 import { catchError, first, map, shareReplay } from 'rxjs/operators'
-import { getHookType, internalRunHook } from '@shared/core-utils/plugins/hooks'
-import { ClientHook, ClientHookName, clientHookObject } from '@shared/models/plugins/client-hook.model'
-import { PluginClientScope } from '@shared/models/plugins/plugin-client-scope.type'
-import { RegisterClientHookOptions } from '@shared/models/plugins/register-client-hook.model'
 import { HttpClient } from '@angular/common/http'
-import { AuthService } from '@app/core'
-import { RestExtractor } from '@app/shared/rest'
-import { PluginType } from '@shared/models/plugins/plugin.type'
-import { PublicServerSetting } from '@shared/models/plugins/public-server.setting'
-import { getDevLocale, isOnDevLocale } from '@app/shared/i18n/i18n-utils'
+import { Inject, Injectable, LOCALE_ID, NgZone } from '@angular/core'
+import { AuthService } from '@app/core/auth'
+import { Notifier } from '@app/core/notification'
+import { MarkdownService } from '@app/core/renderer'
+import { RestExtractor } from '@app/core/rest'
+import { ServerService } from '@app/core/server/server.service'
+import { getDevLocale, importModule, isOnDevLocale } from '@app/helpers'
+import { CustomModalComponent } from '@app/modal/custom-modal.component'
+import { getHookType, internalRunHook } from '@shared/core-utils/plugins/hooks'
+import {
+  ClientHook,
+  ClientHookName,
+  clientHookObject,
+  ClientScript,
+  getCompleteLocale,
+  isDefaultLocale,
+  peertubeTranslate,
+  PluginClientScope,
+  PluginTranslation,
+  PluginType,
+  PublicServerSetting,
+  RegisterClientHookOptions,
+  ServerConfigPlugin
+} from '@shared/models'
+import { environment } from '../../../environments/environment'
+import { ClientScript as ClientScriptModule } from '../../../types/client-script.model'
 import { RegisterClientHelpers } from '../../../types/register-client-option.model'
-import { PluginTranslation } from '@shared/models/plugins/plugin-translation.model'
-import { importModule } from '@app/shared/misc/utils'
 
 interface HookStructValue extends RegisterClientHookOptions {
   plugin: ServerConfigPlugin
@@ -44,10 +52,13 @@ export class PluginService implements ClientHook {
     common: new ReplaySubject<boolean>(1),
     search: new ReplaySubject<boolean>(1),
     'video-watch': new ReplaySubject<boolean>(1),
-    signup: new ReplaySubject<boolean>(1)
+    signup: new ReplaySubject<boolean>(1),
+    login: new ReplaySubject<boolean>(1)
   }
 
   translationsObservable: Observable<PluginTranslation>
+
+  customModal: CustomModalComponent
 
   private plugins: ServerConfigPlugin[] = []
   private scopes: { [ scopeName: string ]: PluginInfo[] } = {}
@@ -58,8 +69,9 @@ export class PluginService implements ClientHook {
   private hooks: { [ name: string ]: HookStructValue[] } = {}
 
   constructor (
-    private router: Router,
     private authService: AuthService,
+    private notifier: Notifier,
+    private markdownRenderer: MarkdownService,
     private server: ServerService,
     private zone: NgZone,
     private authHttp: HttpClient,
@@ -70,14 +82,18 @@ export class PluginService implements ClientHook {
   }
 
   initializePlugins () {
-    this.server.configLoaded
-      .subscribe(() => {
-        this.plugins = this.server.getConfig().plugin.registered
+    this.server.getConfig()
+      .subscribe(config => {
+        this.plugins = config.plugin.registered
 
         this.buildScopeStruct()
 
         this.pluginsBuilt.next(true)
       })
+  }
+
+  initializeCustomModal (customModal: CustomModalComponent) {
+    this.customModal = customModal
   }
 
   ensurePluginsAreBuilt () {
@@ -270,6 +286,32 @@ export class PluginService implements ClientHook {
 
       isLoggedIn: () => {
         return this.authService.isLoggedIn()
+      },
+
+      notifier: {
+        info: (text: string, title?: string, timeout?: number) => this.notifier.info(text, title, timeout),
+        error: (text: string, title?: string, timeout?: number) => this.notifier.error(text, title, timeout),
+        success: (text: string, title?: string, timeout?: number) => this.notifier.success(text, title, timeout)
+      },
+
+      showModal: (input: {
+        title: string,
+        content: string,
+        close?: boolean,
+        cancel?: { value: string, action?: () => void },
+        confirm?: { value: string, action?: () => void }
+      }) => {
+        this.customModal.show(input)
+      },
+
+      markdownRenderer: {
+        textMarkdownToHTML: (textMarkdown: string) => {
+          return this.markdownRenderer.textMarkdownToHTML(textMarkdown)
+        },
+
+        enhancedMarkdownToHTML: (enhancedMarkdown: string) => {
+          return this.markdownRenderer.enhancedMarkdownToHTML(enhancedMarkdown)
+        }
       },
 
       translate: (value: string) => {

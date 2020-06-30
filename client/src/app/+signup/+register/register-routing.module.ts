@@ -1,9 +1,8 @@
 import { NgModule } from '@angular/core'
 import { RouterModule, Routes } from '@angular/router'
+import { ServerConfigResolver, UnloggedGuard } from '@app/core'
 import { MetaGuard } from '@ngx-meta/core'
 import { RegisterComponent } from './register.component'
-import { ServerConfigResolver } from '@app/core/routing/server-config-resolver.service'
-import { UnloggedGuard } from '@app/core/routing/unlogged-guard.service'
 
 const registerRoutes: Routes = [
   {
@@ -16,7 +15,7 @@ const registerRoutes: Routes = [
       }
     },
     resolve: {
-      serverConfigLoaded: ServerConfigResolver
+      serverConfig: ServerConfigResolver
     }
   }
 ]

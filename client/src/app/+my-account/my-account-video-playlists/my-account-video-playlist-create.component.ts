@@ -1,14 +1,13 @@
 import { Component, OnInit } from '@angular/core'
 import { Router } from '@angular/router'
 import { AuthService, Notifier, ServerService } from '@app/core'
-import { MyAccountVideoPlaylistEdit } from './my-account-video-playlist-edit'
+import { FormValidatorService, VideoPlaylistValidatorsService } from '@app/shared/shared-forms'
+import { VideoPlaylistService } from '@app/shared/shared-video-playlist'
 import { I18n } from '@ngx-translate/i18n-polyfill'
-import { FormValidatorService } from '@app/shared/forms/form-validators/form-validator.service'
-import { VideoPlaylistValidatorsService } from '@app/shared'
 import { VideoPlaylistCreate } from '@shared/models/videos/playlist/video-playlist-create.model'
-import { VideoPlaylistService } from '@app/shared/video-playlist/video-playlist.service'
 import { VideoPlaylistPrivacy } from '@shared/models/videos/playlist/video-playlist-privacy.model'
-import { populateAsyncUserVideoChannels } from '@app/shared/misc/utils'
+import { MyAccountVideoPlaylistEdit } from './my-account-video-playlist-edit'
+import { populateAsyncUserVideoChannels } from '@app/helpers'
 
 @Component({
   selector: 'my-account-video-playlist-create',
@@ -47,15 +46,14 @@ export class MyAccountVideoPlaylistCreateComponent extends MyAccountVideoPlaylis
     populateAsyncUserVideoChannels(this.authService, this.userVideoChannels)
       .catch(err => console.error('Cannot populate user video channels.', err))
 
-    this.serverService.videoPlaylistPrivaciesLoaded.subscribe(
-      () => {
-        this.videoPlaylistPrivacies = this.serverService.getVideoPlaylistPrivacies()
+    this.serverService.getVideoPlaylistPrivacies()
+        .subscribe(videoPlaylistPrivacies => {
+          this.videoPlaylistPrivacies = videoPlaylistPrivacies
 
-        this.form.patchValue({
-          privacy: VideoPlaylistPrivacy.PRIVATE
+          this.form.patchValue({
+            privacy: VideoPlaylistPrivacy.PRIVATE
+          })
         })
-      }
-    )
   }
 
   formValidated () {

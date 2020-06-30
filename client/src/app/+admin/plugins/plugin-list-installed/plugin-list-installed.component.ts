@@ -1,14 +1,13 @@
-import { Component, OnInit } from '@angular/core'
-import { PluginType } from '@shared/models/plugins/plugin.type'
-import { I18n } from '@ngx-translate/i18n-polyfill'
-import { PluginApiService } from '@app/+admin/plugins/shared/plugin-api.service'
-import { ComponentPagination, hasMoreItems } from '@app/shared/rest/component-pagination.model'
-import { ConfirmService, Notifier } from '@app/core'
-import { PeerTubePlugin } from '@shared/models/plugins/peertube-plugin.model'
-import { ActivatedRoute, Router } from '@angular/router'
-import { compareSemVer } from '@shared/core-utils/miscs/miscs'
-import { PluginService } from '@app/core/plugins/plugin.service'
 import { Subject } from 'rxjs'
+import { Component, OnInit } from '@angular/core'
+import { ActivatedRoute, Router } from '@angular/router'
+import { PluginApiService } from '@app/+admin/plugins/shared/plugin-api.service'
+import { ComponentPagination, ConfirmService, hasMoreItems, Notifier } from '@app/core'
+import { PluginService } from '@app/core/plugins/plugin.service'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { compareSemVer } from '@shared/core-utils/miscs/miscs'
+import { PeerTubePlugin } from '@shared/models/plugins/peertube-plugin.model'
+import { PluginType } from '@shared/models/plugins/plugin.type'
 
 @Component({
   selector: 'my-plugin-list-installed',
@@ -25,7 +24,8 @@ export class PluginListInstalledComponent implements OnInit {
 
   pagination: ComponentPagination = {
     currentPage: 1,
-    itemsPerPage: 10
+    itemsPerPage: 10,
+    totalItems: null
   }
   sort = 'name'
 
@@ -88,10 +88,10 @@ export class PluginListInstalledComponent implements OnInit {
 
   getNoResultMessage () {
     if (this.pluginType === PluginType.PLUGIN) {
-      return this.i18n('You don\'t have plugins installed yet.')
+      return this.i18n("You don't have plugins installed yet.")
     }
 
-    return this.i18n('You don\'t have themes installed yet.')
+    return this.i18n("You don't have themes installed yet.")
   }
 
   isUpdateAvailable (plugin: PeerTubePlugin) {

@@ -1,8 +1,8 @@
 import * as express from 'express'
-import { UserRight, VideoAbuseCreate, VideoAbuseState } from '../../../../shared'
+import { UserRight, VideoAbuseCreate, VideoAbuseState, VideoAbuse, videoAbusePredefinedReasonsMap } from '../../../../shared'
 import { logger } from '../../../helpers/logger'
-import { getFormattedObjects, getServerActor } from '../../../helpers/utils'
-import { sequelizeTypescript } from '../../../initializers'
+import { getFormattedObjects } from '../../../helpers/utils'
+import { sequelizeTypescript } from '../../../initializers/database'
 import {
   asyncMiddleware,
   asyncRetryTransactionMiddleware,
@@ -14,14 +14,17 @@ import {
   videoAbuseGetValidator,
   videoAbuseReportValidator,
   videoAbusesSortValidator,
-  videoAbuseUpdateValidator
+  videoAbuseUpdateValidator,
+  videoAbuseListValidator
 } from '../../../middlewares'
 import { AccountModel } from '../../../models/account/account'
 import { VideoAbuseModel } from '../../../models/video/video-abuse'
 import { auditLoggerFactory, VideoAbuseAuditView } from '../../../helpers/audit-logger'
 import { Notifier } from '../../../lib/notifier'
 import { sendVideoAbuse } from '../../../lib/activitypub/send/send-flag'
-import { MVideoAbuseAccountVideo } from '../../../typings/models/video'
+import { MVideoAbuseAccountVideo } from '../../../types/models/video'
+import { getServerActor } from '@server/models/application/application'
+import { MAccountDefault } from '@server/types/models'
 
 const auditLogger = auditLoggerFactory('abuse')
 const abuseVideoRouter = express.Router()
@@ -33,6 +36,7 @@ abuseVideoRouter.get('/abuse',
   videoAbusesSortValidator,
   setDefaultSort,
   setDefaultPagination,
+  videoAbuseListValidator,
   asyncMiddleware(listVideoAbuses)
 )
 abuseVideoRouter.put('/:videoId/abuse/:id',
@@ -69,6 +73,15 @@ async function listVideoAbuses (req: express.Request, res: express.Response) {
     start: req.query.start,
     count: req.query.count,
     sort: req.query.sort,
+    id: req.query.id,
+    predefinedReason: req.query.predefinedReason,
+    search: req.query.search,
+    state: req.query.state,
+    videoIs: req.query.videoIs,
+    searchReporter: req.query.searchReporter,
+    searchReportee: req.query.searchReportee,
+    searchVideo: req.query.searchVideo,
+    searchVideoChannel: req.query.searchVideoChannel,
     serverAccountId: serverActor.Account.id,
     user
   })
@@ -106,15 +119,21 @@ async function deleteVideoAbuse (req: express.Request, res: express.Response) {
 async function reportVideoAbuse (req: express.Request, res: express.Response) {
   const videoInstance = res.locals.videoAll
   const body: VideoAbuseCreate = req.body
+  let reporterAccount: MAccountDefault
+  let videoAbuseJSON: VideoAbuse
 
-  const videoAbuse = await sequelizeTypescript.transaction(async t => {
-    const reporterAccount = await AccountModel.load(res.locals.oauth.token.User.Account.id, t)
+  const videoAbuseInstance = await sequelizeTypescript.transaction(async t => {
+    reporterAccount = await AccountModel.load(res.locals.oauth.token.User.Account.id, t)
+    const predefinedReasons = body.predefinedReasons?.map(r => videoAbusePredefinedReasonsMap[r])
 
     const abuseToCreate = {
       reporterAccountId: reporterAccount.id,
       reason: body.reason,
       videoId: videoInstance.id,
-      state: VideoAbuseState.PENDING
+      state: VideoAbuseState.PENDING,
+      predefinedReasons,
+      startAt: body.startAt,
+      endAt: body.endAt
     }
 
     const videoAbuseInstance: MVideoAbuseAccountVideo = await VideoAbuseModel.create(abuseToCreate, { transaction: t })
@@ -126,14 +145,19 @@ async function reportVideoAbuse (req: express.Request, res: express.Response) {
       await sendVideoAbuse(reporterAccount.Actor, videoAbuseInstance, videoInstance, t)
     }
 
-    auditLogger.create(reporterAccount.Actor.getIdentifier(), new VideoAbuseAuditView(videoAbuseInstance.toFormattedJSON()))
+    videoAbuseJSON = videoAbuseInstance.toFormattedJSON()
+    auditLogger.create(reporterAccount.Actor.getIdentifier(), new VideoAbuseAuditView(videoAbuseJSON))
 
     return videoAbuseInstance
   })
 
-  Notifier.Instance.notifyOnNewVideoAbuse(videoAbuse)
+  Notifier.Instance.notifyOnNewVideoAbuse({
+    videoAbuse: videoAbuseJSON,
+    videoAbuseInstance,
+    reporter: reporterAccount.Actor.getIdentifier()
+  })
 
-  logger.info('Abuse report for video %s created.', videoInstance.name)
+  logger.info('Abuse report for video "%s" created.', videoInstance.name)
 
-  return res.json({ videoAbuse: videoAbuse.toFormattedJSON() }).end()
+  return res.json({ videoAbuse: videoAbuseJSON }).end()
 }

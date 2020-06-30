@@ -1,5 +1,5 @@
 import { Component, ViewChild } from '@angular/core'
-import { UserNotificationsComponent } from '@app/shared'
+import { UserNotificationsComponent } from '@app/shared/shared-main'
 
 @Component({
   templateUrl: './my-account-notifications.component.html',
@@ -10,5 +10,9 @@ export class MyAccountNotificationsComponent {
 
   markAllAsRead () {
     this.userNotification.markAllAsRead()
+  }
+
+  hasUnreadNotifications () {
+    return this.userNotification.notifications.filter(n => n.read === false).length !== 0
   }
 }

@@ -2,7 +2,7 @@ import * as express from 'express'
 import * as RateLimit from 'express-rate-limit'
 import { UserCreate, UserRight, UserRole, UserUpdate } from '../../../../shared'
 import { logger } from '../../../helpers/logger'
-import { getFormattedObjects } from '../../../helpers/utils'
+import { generateRandomString, getFormattedObjects } from '../../../helpers/utils'
 import { WEBSERVER } from '../../../initializers/constants'
 import { Emailer } from '../../../lib/emailer'
 import { Redis } from '../../../lib/redis'
@@ -17,7 +17,6 @@ import {
   paginationValidator,
   setDefaultPagination,
   setDefaultSort,
-  token,
   userAutocompleteValidator,
   usersAddValidator,
   usersGetValidator,
@@ -27,12 +26,12 @@ import {
   usersUpdateValidator
 } from '../../../middlewares'
 import {
+  ensureCanManageUser,
   usersAskResetPasswordValidator,
   usersAskSendVerifyEmailValidator,
   usersBlockingValidator,
   usersResetPasswordValidator,
-  usersVerifyEmailValidator,
-  ensureCanManageUser
+  usersVerifyEmailValidator
 } from '../../../middlewares/validators'
 import { UserModel } from '../../../models/account/user'
 import { auditLoggerFactory, getAuditIdFromRes, UserAuditView } from '../../../helpers/audit-logger'
@@ -48,31 +47,25 @@ import { CONFIG } from '../../../initializers/config'
 import { sequelizeTypescript } from '../../../initializers/database'
 import { UserAdminFlag } from '../../../../shared/models/users/user-flag.model'
 import { UserRegister } from '../../../../shared/models/users/user-register.model'
-import { MUser, MUserAccountDefault } from '@server/typings/models'
+import { MUser, MUserAccountDefault } from '@server/types/models'
+import { Hooks } from '@server/lib/plugins/hooks'
+import { tokensRouter } from '@server/controllers/api/users/token'
 
 const auditLogger = auditLoggerFactory('users')
 
-// FIXME: https://github.com/nfriedly/express-rate-limit/issues/138
-// @ts-ignore
-const loginRateLimiter = RateLimit({
-  windowMs: CONFIG.RATES_LIMIT.LOGIN.WINDOW_MS,
-  max: CONFIG.RATES_LIMIT.LOGIN.MAX
-})
-
-// @ts-ignore
 const signupRateLimiter = RateLimit({
   windowMs: CONFIG.RATES_LIMIT.SIGNUP.WINDOW_MS,
   max: CONFIG.RATES_LIMIT.SIGNUP.MAX,
   skipFailedRequests: true
 })
 
-// @ts-ignore
-const askSendEmailLimiter = new RateLimit({
+const askSendEmailLimiter = RateLimit({
   windowMs: CONFIG.RATES_LIMIT.ASK_SEND_EMAIL.WINDOW_MS,
   max: CONFIG.RATES_LIMIT.ASK_SEND_EMAIL.MAX
 })
 
 const usersRouter = express.Router()
+usersRouter.use('/', tokensRouter)
 usersRouter.use('/', myNotificationsRouter)
 usersRouter.use('/', mySubscriptionsRouter)
 usersRouter.use('/', myBlocklistRouter)
@@ -169,13 +162,6 @@ usersRouter.post('/:id/verify-email',
   asyncMiddleware(verifyUserEmail)
 )
 
-usersRouter.post('/token',
-  loginRateLimiter,
-  token,
-  success
-)
-// TODO: Once https://github.com/oauthjs/node-oauth2-server/pull/289 is merged, implement revoke token route
-
 // ---------------------------------------------------------------------------
 
 export {
@@ -198,12 +184,28 @@ async function createUser (req: express.Request, res: express.Response) {
     adminFlags: body.adminFlags || UserAdminFlag.NONE
   }) as MUser
 
-  const { user, account } = await createUserAccountAndChannelAndPlaylist({ userToCreate: userToCreate })
+  // NB: due to the validator usersAddValidator, password==='' can only be true if we can send the mail.
+  const createPassword = userToCreate.password === ''
+  if (createPassword) {
+    userToCreate.password = await generateRandomString(20)
+  }
+
+  const { user, account, videoChannel } = await createUserAccountAndChannelAndPlaylist({ userToCreate: userToCreate })
 
   auditLogger.create(getAuditIdFromRes(res), new UserAuditView(user.toFormattedJSON()))
   logger.info('User %s with its channel and account created.', body.username)
 
-  return res.json({
+  if (createPassword) {
+    // this will send an email for newly created users, so then can set their first password.
+    logger.info('Sending to user %s a create password email', body.username)
+    const verificationString = await Redis.Instance.setCreatePasswordVerificationString(user.id)
+    const url = WEBSERVER.URL + '/reset-password?userId=' + user.id + '&verificationString=' + verificationString
+    await Emailer.Instance.addPasswordCreateEmailJob(userToCreate.username, user.email, url)
+  }
+
+  Hooks.runAction('action:api.user.created', { body, user, account, videoChannel })
+
+  return res.status(201).json({
     user: {
       id: user.id,
       account: {
@@ -228,7 +230,7 @@ async function registerUser (req: express.Request, res: express.Response) {
     emailVerified: CONFIG.SIGNUP.REQUIRES_EMAIL_VERIFICATION ? false : null
   })
 
-  const { user } = await createUserAccountAndChannelAndPlaylist({
+  const { user, account, videoChannel } = await createUserAccountAndChannelAndPlaylist({
     userToCreate: userToCreate,
     userDisplayName: body.displayName || undefined,
     channelNames: body.channel
@@ -243,6 +245,8 @@ async function registerUser (req: express.Request, res: express.Response) {
 
   Notifier.Instance.notifyOnNewUserRegistration(user)
 
+  Hooks.runAction('action:api.user.registered', { body, user, account, videoChannel })
+
   return res.type('json').status(204).end()
 }
 
@@ -250,6 +254,8 @@ async function unblockUser (req: express.Request, res: express.Response) {
   const user = res.locals.user
 
   await changeUserBlock(res, user, false)
+
+  Hooks.runAction('action:api.user.unblocked', { user })
 
   return res.status(204).end()
 }
@@ -259,6 +265,8 @@ async function blockUser (req: express.Request, res: express.Response) {
   const reason = req.body.reason
 
   await changeUserBlock(res, user, true, reason)
+
+  Hooks.runAction('action:api.user.blocked', { user })
 
   return res.status(204).end()
 }
@@ -286,6 +294,8 @@ async function removeUser (req: express.Request, res: express.Response) {
 
   auditLogger.delete(getAuditIdFromRes(res), new UserAuditView(user.toFormattedJSON()))
 
+  Hooks.runAction('action:api.user.deleted', { user })
+
   return res.sendStatus(204)
 }
 
@@ -309,6 +319,8 @@ async function updateUser (req: express.Request, res: express.Response) {
   if (roleChanged || body.password !== undefined) await deleteUserToken(userToUpdate.id)
 
   auditLogger.update(getAuditIdFromRes(res), new UserAuditView(user.toFormattedJSON()), oldUserAuditView)
+
+  Hooks.runAction('action:api.user.updated', { user })
 
   // Don't need to send this update to followers, these attributes are not federated
 
@@ -354,10 +366,6 @@ async function verifyUserEmail (req: express.Request, res: express.Response) {
   await user.save()
 
   return res.status(204).end()
-}
-
-function success (req: express.Request, res: express.Response) {
-  res.end()
 }
 
 async function changeUserBlock (res: express.Response, user: MUserAccountDefault, block: boolean, reason?: string) {

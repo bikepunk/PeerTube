@@ -1,23 +1,18 @@
+import { Subscription } from 'rxjs'
+import { first, tap } from 'rxjs/operators'
 import { Component, OnDestroy, OnInit } from '@angular/core'
 import { ActivatedRoute, Router } from '@angular/router'
-import { immutableAssign } from '@app/shared/misc/utils'
-import { AuthService } from '../../core/auth'
-import { ConfirmService } from '../../core/confirm'
-import { AbstractVideoList } from '../../shared/video/abstract-video-list'
-import { VideoService } from '../../shared/video/video.service'
-import { VideoChannelService } from '@app/shared/video-channel/video-channel.service'
-import { VideoChannel } from '@app/shared/video-channel/video-channel.model'
-import { first, tap } from 'rxjs/operators'
+import { AuthService, ConfirmService, LocalStorageService, Notifier, ScreenService, ServerService, UserService } from '@app/core'
+import { immutableAssign } from '@app/helpers'
+import { VideoChannel, VideoChannelService, VideoService } from '@app/shared/shared-main'
+import { AbstractVideoList } from '@app/shared/shared-video-miniature'
 import { I18n } from '@ngx-translate/i18n-polyfill'
-import { Subscription } from 'rxjs'
-import { ScreenService } from '@app/shared/misc/screen.service'
-import { Notifier, ServerService } from '@app/core'
 
 @Component({
   selector: 'my-video-channel-videos',
-  templateUrl: '../../shared/video/abstract-video-list.html',
+  templateUrl: '../../shared/shared-video-miniature/abstract-video-list.html',
   styleUrls: [
-    '../../shared/video/abstract-video-list.scss',
+    '../../shared/shared-video-miniature/abstract-video-list.scss',
     './video-channel-videos.component.scss'
   ]
 })
@@ -34,15 +29,21 @@ export class VideoChannelVideosComponent extends AbstractVideoList implements On
     protected serverService: ServerService,
     protected route: ActivatedRoute,
     protected authService: AuthService,
+    protected userService: UserService,
     protected notifier: Notifier,
     protected confirmService: ConfirmService,
     protected screenService: ScreenService,
+    protected storageService: LocalStorageService,
     private videoChannelService: VideoChannelService,
     private videoService: VideoService
   ) {
     super()
 
     this.titlePage = this.i18n('Published videos')
+    this.displayOptions = {
+      ...this.displayOptions,
+      avatar: false
+    }
   }
 
   ngOnInit () {
@@ -69,10 +70,10 @@ export class VideoChannelVideosComponent extends AbstractVideoList implements On
     const newPagination = immutableAssign(this.pagination, { currentPage: page })
 
     return this.videoService
-               .getVideoChannelVideos(this.videoChannel, newPagination, this.sort)
+               .getVideoChannelVideos(this.videoChannel, newPagination, this.sort, this.nsfwPolicy)
                .pipe(
                  tap(({ total }) => {
-                   this.titlePage = this.i18n('Published {{total}} videos', { total })
+                   this.titlePage = this.i18n(`{total, plural, =1 {Published 1 video} other {Published {{total}} videos}}`, { total })
                  })
                )
   }

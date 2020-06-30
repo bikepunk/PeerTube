@@ -2,9 +2,10 @@ import { BelongsTo, Column, CreatedAt, ForeignKey, Model, Scopes, Table, Updated
 import { AccountModel } from '../account/account'
 import { ServerModel } from './server'
 import { ServerBlock } from '../../../shared/models/blocklist'
-import { getSort } from '../utils'
+import { getSort, searchAttribute } from '../utils'
 import * as Bluebird from 'bluebird'
-import { MServerBlocklist, MServerBlocklistAccountServer, MServerBlocklistFormattable } from '@server/typings/models'
+import { MServerBlocklist, MServerBlocklistAccountServer, MServerBlocklistFormattable } from '@server/types/models'
+import { Op } from 'sequelize'
 
 enum ScopeNames {
   WITH_ACCOUNT = 'WITH_ACCOUNT',
@@ -75,6 +76,31 @@ export class ServerBlocklistModel extends Model<ServerBlocklistModel> {
   })
   BlockedServer: ServerModel
 
+  static isServerMutedByMulti (accountIds: number[], targetServerId: number) {
+    const query = {
+      attributes: [ 'accountId', 'id' ],
+      where: {
+        accountId: {
+          [Op.in]: accountIds
+        },
+        targetServerId
+      },
+      raw: true
+    }
+
+    return ServerBlocklistModel.unscoped()
+                                .findAll(query)
+                                .then(rows => {
+                                  const result: { [accountId: number]: boolean } = {}
+
+                                  for (const accountId of accountIds) {
+                                    result[accountId] = !!rows.find(r => r.accountId === accountId)
+                                  }
+
+                                  return result
+                                })
+  }
+
   static loadByAccountAndHost (accountId: number, host: string): Bluebird<MServerBlocklist> {
     const query = {
       where: {
@@ -94,13 +120,43 @@ export class ServerBlocklistModel extends Model<ServerBlocklistModel> {
     return ServerBlocklistModel.findOne(query)
   }
 
-  static listForApi (accountId: number, start: number, count: number, sort: string) {
+  static listHostsBlockedBy (accountIds: number[]): Bluebird<string[]> {
+    const query = {
+      attributes: [ ],
+      where: {
+        accountId: {
+          [Op.in]: accountIds
+        }
+      },
+      include: [
+        {
+          attributes: [ 'host' ],
+          model: ServerModel.unscoped(),
+          required: true
+        }
+      ]
+    }
+
+    return ServerBlocklistModel.findAll(query)
+      .then(entries => entries.map(e => e.BlockedServer.host))
+  }
+
+  static listForApi (parameters: {
+    start: number
+    count: number
+    sort: string
+    search?: string
+    accountId: number
+  }) {
+    const { start, count, sort, search, accountId } = parameters
+
     const query = {
       offset: start,
       limit: count,
       order: getSort(sort),
       where: {
-        accountId
+        accountId,
+        ...searchAttribute(search, '$BlockedServer.host$')
       }
     }
 

@@ -1,14 +1,12 @@
-import { Component, OnInit } from '@angular/core'
-import { Notifier, ServerService } from '@app/core'
-import { ConfirmService } from '../../../core'
-import { I18n } from '@ngx-translate/i18n-polyfill'
-import { PluginType } from '@shared/models/plugins/plugin.type'
-import { PluginApiService } from '@app/+admin/plugins/shared/plugin-api.service'
-import { ComponentPagination, hasMoreItems } from '@app/shared/rest/component-pagination.model'
-import { ActivatedRoute, Router } from '@angular/router'
-import { PeerTubePluginIndex } from '@shared/models/plugins/peertube-plugin-index.model'
 import { Subject } from 'rxjs'
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators'
+import { Component, OnInit } from '@angular/core'
+import { ActivatedRoute, Router } from '@angular/router'
+import { PluginApiService } from '@app/+admin/plugins/shared/plugin-api.service'
+import { ComponentPagination, ConfirmService, hasMoreItems, Notifier, ServerService } from '@app/core'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { PeerTubePluginIndex } from '@shared/models/plugins/peertube-plugin-index.model'
+import { PluginType } from '@shared/models/plugins/plugin.type'
 
 @Component({
   selector: 'my-plugin-search',
@@ -25,7 +23,8 @@ export class PluginSearchComponent implements OnInit {
 
   pagination: ComponentPagination = {
     currentPage: 1,
-    itemsPerPage: 10
+    itemsPerPage: 10,
+    totalItems: null
   }
   sort = '-popularity'
 
@@ -69,8 +68,10 @@ export class PluginSearchComponent implements OnInit {
     this.reloadPlugins()
   }
 
-  onSearchChange (search: string) {
-    this.searchSubject.next(search)
+  onSearchChange (event: Event) {
+    const target = event.target as HTMLInputElement
+
+    this.searchSubject.next(target.value)
   }
 
   reloadPlugins () {

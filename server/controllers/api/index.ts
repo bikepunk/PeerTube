@@ -1,20 +1,21 @@
+import * as cors from 'cors'
 import * as express from 'express'
 import * as RateLimit from 'express-rate-limit'
+import { badRequest } from '../../helpers/express-utils'
+import { CONFIG } from '../../initializers/config'
+import { accountsRouter } from './accounts'
+import { bulkRouter } from './bulk'
 import { configRouter } from './config'
 import { jobsRouter } from './jobs'
 import { oauthClientsRouter } from './oauth-clients'
+import { overviewsRouter } from './overviews'
+import { pluginRouter } from './plugins'
+import { searchRouter } from './search'
 import { serverRouter } from './server'
 import { usersRouter } from './users'
-import { accountsRouter } from './accounts'
-import { videosRouter } from './videos'
-import { badRequest } from '../../helpers/express-utils'
 import { videoChannelRouter } from './video-channel'
-import * as cors from 'cors'
-import { searchRouter } from './search'
-import { overviewsRouter } from './overviews'
 import { videoPlaylistRouter } from './video-playlist'
-import { CONFIG } from '../../initializers/config'
-import { pluginRouter } from './plugins'
+import { videosRouter } from './videos'
 
 const apiRouter = express.Router()
 
@@ -24,8 +25,6 @@ apiRouter.use(cors({
   credentials: true
 }))
 
-// FIXME: https://github.com/nfriedly/express-rate-limit/issues/138
-// @ts-ignore
 const apiRateLimiter = RateLimit({
   windowMs: CONFIG.RATES_LIMIT.API.WINDOW_MS,
   max: CONFIG.RATES_LIMIT.API.MAX
@@ -33,6 +32,7 @@ const apiRateLimiter = RateLimit({
 apiRouter.use(apiRateLimiter)
 
 apiRouter.use('/server', serverRouter)
+apiRouter.use('/bulk', bulkRouter)
 apiRouter.use('/oauth-clients', oauthClientsRouter)
 apiRouter.use('/config', configRouter)
 apiRouter.use('/users', usersRouter)

@@ -2,29 +2,20 @@ import { NgModule } from '@angular/core'
 import { RouterModule, Routes } from '@angular/router'
 import { MetaGuard } from '@ngx-meta/core'
 import { LoginGuard } from '../core'
-import { MyAccountComponent } from './my-account.component'
+import { MyAccountBlocklistComponent } from './my-account-blocklist/my-account-blocklist.component'
+import { MyAccountServerBlocklistComponent } from './my-account-blocklist/my-account-server-blocklist.component'
+import { MyAccountHistoryComponent } from './my-account-history/my-account-history.component'
+import { MyAccountNotificationsComponent } from './my-account-notifications/my-account-notifications.component'
+import { MyAccountOwnershipComponent } from './my-account-ownership/my-account-ownership.component'
 import { MyAccountSettingsComponent } from './my-account-settings/my-account-settings.component'
+import { MyAccountSubscriptionsComponent } from './my-account-subscriptions/my-account-subscriptions.component'
+import { MyAccountVideoImportsComponent } from './my-account-video-imports/my-account-video-imports.component'
+import { MyAccountVideoPlaylistCreateComponent } from './my-account-video-playlists/my-account-video-playlist-create.component'
+import { MyAccountVideoPlaylistElementsComponent } from './my-account-video-playlists/my-account-video-playlist-elements.component'
+import { MyAccountVideoPlaylistUpdateComponent } from './my-account-video-playlists/my-account-video-playlist-update.component'
+import { MyAccountVideoPlaylistsComponent } from './my-account-video-playlists/my-account-video-playlists.component'
 import { MyAccountVideosComponent } from './my-account-videos/my-account-videos.component'
-import { MyAccountVideoChannelsComponent } from '@app/+my-account/my-account-video-channels/my-account-video-channels.component'
-import { MyAccountVideoChannelCreateComponent } from '@app/+my-account/my-account-video-channels/my-account-video-channel-create.component'
-import { MyAccountVideoChannelUpdateComponent } from '@app/+my-account/my-account-video-channels/my-account-video-channel-update.component'
-import { MyAccountVideoImportsComponent } from '@app/+my-account/my-account-video-imports/my-account-video-imports.component'
-import { MyAccountSubscriptionsComponent } from '@app/+my-account/my-account-subscriptions/my-account-subscriptions.component'
-import { MyAccountOwnershipComponent } from '@app/+my-account/my-account-ownership/my-account-ownership.component'
-import { MyAccountBlocklistComponent } from '@app/+my-account/my-account-blocklist/my-account-blocklist.component'
-import { MyAccountServerBlocklistComponent } from '@app/+my-account/my-account-blocklist/my-account-server-blocklist.component'
-import { MyAccountHistoryComponent } from '@app/+my-account/my-account-history/my-account-history.component'
-import { MyAccountNotificationsComponent } from '@app/+my-account/my-account-notifications/my-account-notifications.component'
-import { MyAccountVideoPlaylistsComponent } from '@app/+my-account/my-account-video-playlists/my-account-video-playlists.component'
-import {
-  MyAccountVideoPlaylistCreateComponent
-} from '@app/+my-account/my-account-video-playlists/my-account-video-playlist-create.component'
-import {
-  MyAccountVideoPlaylistUpdateComponent
-} from '@app/+my-account/my-account-video-playlists/my-account-video-playlist-update.component'
-import {
-  MyAccountVideoPlaylistElementsComponent
-} from '@app/+my-account/my-account-video-playlists/my-account-video-playlist-elements.component'
+import { MyAccountComponent } from './my-account.component'
 
 const myAccountRoutes: Routes = [
   {
@@ -49,29 +40,9 @@ const myAccountRoutes: Routes = [
 
       {
         path: 'video-channels',
-        component: MyAccountVideoChannelsComponent,
-        data: {
-          meta: {
-            title: 'Account video channels'
-          }
-        }
-      },
-      {
-        path: 'video-channels/create',
-        component: MyAccountVideoChannelCreateComponent,
-        data: {
-          meta: {
-            title: 'Create new video channel'
-          }
-        }
-      },
-      {
-        path: 'video-channels/update/:videoChannelId',
-        component: MyAccountVideoChannelUpdateComponent,
-        data: {
-          meta: {
-            title: 'Update video channel'
-          }
+        loadChildren: () => {
+          return import('./+my-account-video-channels/my-account-video-channels.module')
+            .then(m => m.MyAccountVideoChannelsModule)
         }
       },
 
@@ -166,7 +137,7 @@ const myAccountRoutes: Routes = [
         component: MyAccountServerBlocklistComponent,
         data: {
           meta: {
-            title: 'Muted instances'
+            title: 'Muted servers'
           }
         }
       },

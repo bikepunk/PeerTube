@@ -1,26 +1,30 @@
-import { Component } from '@angular/core'
-import { UserRight } from '../../../../../shared'
+import { Component, OnInit } from '@angular/core'
 import { AuthService, ServerService } from '@app/core'
+import { UserRight } from '@shared/models'
 
 @Component({
   templateUrl: './moderation.component.html',
   styleUrls: [ './moderation.component.scss' ]
 })
-export class ModerationComponent {
-  autoBlacklistVideosEnabled: boolean
+export class ModerationComponent implements OnInit {
+  autoBlockVideosEnabled = false
 
   constructor (
     private auth: AuthService,
     private serverService: ServerService
-  ) {
-    this.autoBlacklistVideosEnabled = this.serverService.getConfig().autoBlacklist.videos.ofUsers.enabled
+  ) { }
+
+  ngOnInit (): void {
+    this.serverService.getConfig()
+      .subscribe(config => this.autoBlockVideosEnabled = config.autoBlacklist.videos.ofUsers.enabled)
+
   }
 
   hasVideoAbusesRight () {
     return this.auth.getUser().hasRight(UserRight.MANAGE_VIDEO_ABUSES)
   }
 
-  hasVideoBlacklistRight () {
+  hasVideoBlocklistRight () {
     return this.auth.getUser().hasRight(UserRight.MANAGE_VIDEO_BLACKLIST)
   }
 

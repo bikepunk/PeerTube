@@ -1,11 +1,11 @@
 import { Component, EventEmitter, OnInit, Output, ViewChild } from '@angular/core'
 import { Notifier } from '@app/core'
-import { FormReactive, VideoAbuseService, VideoAbuseValidatorsService } from '../../../shared'
-import { I18n } from '@ngx-translate/i18n-polyfill'
+import { FormReactive, FormValidatorService, VideoAbuseValidatorsService } from '@app/shared/shared-forms'
+import { VideoAbuseService } from '@app/shared/shared-moderation'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
 import { NgbModalRef } from '@ng-bootstrap/ng-bootstrap/modal/modal-ref'
-import { FormValidatorService } from '../../../shared/forms/form-validators/form-validator.service'
-import { VideoAbuse } from '../../../../../../shared/models/videos'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { VideoAbuse } from '@shared/models'
 
 @Component({
   selector: 'my-moderation-comment-modal',
@@ -32,13 +32,13 @@ export class ModerationCommentModalComponent extends FormReactive implements OnI
 
   ngOnInit () {
     this.buildForm({
-      moderationComment: this.videoAbuseValidatorsService.VIDEO_ABUSE_REASON
+      moderationComment: this.videoAbuseValidatorsService.VIDEO_ABUSE_MODERATION_COMMENT
     })
   }
 
   openModal (abuseToComment: VideoAbuse) {
     this.abuseToComment = abuseToComment
-    this.openedModal = this.modalService.open(this.modal)
+    this.openedModal = this.modalService.open(this.modal, { centered: true })
 
     this.form.patchValue({
       moderationComment: this.abuseToComment.moderationComment

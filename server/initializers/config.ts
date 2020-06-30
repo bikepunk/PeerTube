@@ -1,10 +1,12 @@
 import { IConfig } from 'config'
 import { dirname, join } from 'path'
-import { VideosRedundancy } from '../../shared/models'
+import { VideosRedundancyStrategy } from '../../shared/models'
 // Do not use barrels, remain constants as independent as possible
 import { buildPath, parseBytes, parseDurationToMs, root } from '../helpers/core-utils'
 import { NSFWPolicyType } from '../../shared/models/videos/nsfw-policy.type'
 import * as bytes from 'bytes'
+import { VideoRedundancyConfigFilter } from '@shared/models/redundancy/video-redundancy-config-filter.type'
+import { BroadcastMessageLevel } from '@shared/models/server'
 
 // Use a variable to reload the configuration if we need
 let config: IConfig = require('config')
@@ -18,7 +20,7 @@ const CONFIG = {
     HOSTNAME: config.get<string>('listen.hostname')
   },
   DATABASE: {
-    DBNAME: 'peertube' + config.get<string>('database.suffix'),
+    DBNAME: config.has('database.name') ? config.get<string>('database.name') : 'peertube' + config.get<string>('database.suffix'),
     HOSTNAME: config.get<string>('database.hostname'),
     PORT: config.get<number>('database.port'),
     USERNAME: config.get<string>('database.username'),
@@ -35,6 +37,8 @@ const CONFIG = {
     DB: config.has('redis.db') ? config.get<number>('redis.db') : null
   },
   SMTP: {
+    TRANSPORT: config.has('smtp.transport') ? config.get<string>('smtp.transport') : 'smtp',
+    SENDMAIL: config.has('smtp.sendmail') ? config.get<string>('smtp.sendmail') : null,
     HOSTNAME: config.get<string>('smtp.hostname'),
     PORT: config.get<number>('smtp.port'),
     USERNAME: config.get<string>('smtp.username'),
@@ -93,13 +97,12 @@ const CONFIG = {
   TRUST_PROXY: config.get<string[]>('trust_proxy'),
   LOG: {
     LEVEL: config.get<string>('log.level'),
-    ROTATION: config.get<boolean>('log.rotation.enabled')
-  },
-  SEARCH: {
-    REMOTE_URI: {
-      USERS: config.get<boolean>('search.remote_uri.users'),
-      ANONYMOUS: config.get<boolean>('search.remote_uri.anonymous')
-    }
+    ROTATION: {
+      ENABLED: config.get<boolean>('log.rotation.enabled'),
+      MAX_FILE_SIZE: bytes.parse(config.get<string>('log.rotation.maxFileSize')),
+      MAX_FILES: config.get<number>('log.rotation.maxFiles')
+    },
+    ANONYMIZE_IP: config.get<boolean>('log.anonymizeIP')
   },
   TRENDING: {
     VIDEOS: {
@@ -110,6 +113,11 @@ const CONFIG = {
     VIDEOS: {
       CHECK_INTERVAL: parseDurationToMs(config.get<string>('redundancy.videos.check_interval')),
       STRATEGIES: buildVideosRedundancy(config.get<any[]>('redundancy.videos.strategies'))
+    }
+  },
+  REMOTE_REDUNDANCY: {
+    VIDEOS: {
+      ACCEPT_FROM: config.get<VideoRedundancyConfigFilter>('remote_redundancy.videos.accept_from')
     }
   },
   CSP: {
@@ -139,6 +147,11 @@ const CONFIG = {
       ENABLED: config.get<boolean>('plugins.index.enabled'),
       CHECK_LATEST_VERSIONS_INTERVAL: parseDurationToMs(config.get<string>('plugins.index.check_latest_versions_interval')),
       URL: config.get<string>('plugins.index.url')
+    }
+  },
+  FEDERATION: {
+    VIDEOS: {
+      FEDERATE_UNLISTED: config.get<boolean>('federation.videos.federate_unlisted')
     }
   },
   ADMIN: {
@@ -186,7 +199,11 @@ const CONFIG = {
   IMPORT: {
     VIDEOS: {
       HTTP: {
-        get ENABLED () { return config.get<boolean>('import.videos.http.enabled') }
+        get ENABLED () { return config.get<boolean>('import.videos.http.enabled') },
+        PROXY: {
+          get ENABLED () { return config.get<boolean>('import.videos.http.proxy.enabled') },
+          get URL () { return config.get<string>('import.videos.http.proxy.url') }
+        }
       },
       TORRENT: {
         get ENABLED () { return config.get<boolean>('import.videos.torrent.enabled') }
@@ -268,6 +285,24 @@ const CONFIG = {
   },
   THEME: {
     get DEFAULT () { return config.get<string>('theme.default') }
+  },
+  BROADCAST_MESSAGE: {
+    get ENABLED () { return config.get<boolean>('broadcast_message.enabled') },
+    get MESSAGE () { return config.get<string>('broadcast_message.message') },
+    get LEVEL () { return config.get<BroadcastMessageLevel>('broadcast_message.level') },
+    get DISMISSABLE () { return config.get<boolean>('broadcast_message.dismissable') }
+  },
+  SEARCH: {
+    REMOTE_URI: {
+      USERS: config.get<boolean>('search.remote_uri.users'),
+      ANONYMOUS: config.get<boolean>('search.remote_uri.anonymous')
+    },
+    SEARCH_INDEX: {
+      get ENABLED () { return config.get<boolean>('search.search_index.enabled') },
+      get URL () { return config.get<string>('search.search_index.url') },
+      get DISABLE_LOCAL_SEARCH () { return config.get<boolean>('search.search_index.disable_local_search') },
+      get IS_DEFAULT_SEARCH () { return config.get<boolean>('search.search_index.is_default_search') }
+    }
   }
 }
 
@@ -275,11 +310,16 @@ function registerConfigChangedHandler (fun: Function) {
   configChangedHandlers.push(fun)
 }
 
+function isEmailEnabled () {
+  return !!CONFIG.SMTP.HOSTNAME && !!CONFIG.SMTP.PORT
+}
+
 // ---------------------------------------------------------------------------
 
 export {
   CONFIG,
-  registerConfigChangedHandler
+  registerConfigChangedHandler,
+  isEmailEnabled
 }
 
 // ---------------------------------------------------------------------------
@@ -292,10 +332,10 @@ function getLocalConfigFilePath () {
   if (process.env.NODE_ENV) filename += `-${process.env.NODE_ENV}`
   if (process.env.NODE_APP_INSTANCE) filename += `-${process.env.NODE_APP_INSTANCE}`
 
-  return join(dirname(configSources[ 0 ].name), filename + '.json')
+  return join(dirname(configSources[0].name), filename + '.json')
 }
 
-function buildVideosRedundancy (objs: any[]): VideosRedundancy[] {
+function buildVideosRedundancy (objs: any[]): VideosRedundancyStrategy[] {
   if (!objs) return []
 
   if (!Array.isArray(objs)) return objs
@@ -321,7 +361,7 @@ export function reloadConfig () {
 
   function purge () {
     for (const fileName in require.cache) {
-      if (-1 === fileName.indexOf(directory())) {
+      if (fileName.includes(directory()) === false) {
         continue
       }
 

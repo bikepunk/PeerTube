@@ -1,10 +1,9 @@
 import { Routes } from '@angular/router'
-
-import { UserRightGuard } from '../../core'
-import { UserRight } from '../../../../../shared'
-import { UsersComponent } from './users.component'
+import { ServerConfigResolver, UserRightGuard } from '@app/core'
+import { UserRight } from '@shared/models'
 import { UserCreateComponent, UserUpdateComponent } from './user-edit'
 import { UserListComponent } from './user-list'
+import { UsersComponent } from './users.component'
 
 export const UsersRoutes: Routes = [
   {
@@ -36,6 +35,9 @@ export const UsersRoutes: Routes = [
           meta: {
             title: 'Create a user'
           }
+        },
+        resolve: {
+          serverConfig: ServerConfigResolver
         }
       },
       {

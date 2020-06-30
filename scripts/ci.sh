@@ -9,9 +9,12 @@ fi
 
 killall -q peertube || true
 
+perl -0777 -i  -pe 's#proxy:(\n\s+)enabled: false\n\s+url: ""#proxy:$1enabled: true$1url: "http://188.165.225.149:7899"#' config/test.yaml
+
 if [ "$1" = "misc" ]; then
-    npm run build -- --light-fr
-    mocha --timeout 5000 --exit --require ts-node/register --require tsconfig-paths/register --bail server/tests/client.ts \
+    npm run build -- --light
+    TS_NODE_FILES=true mocha --timeout 5000 --exit --require ts-node/register --require tsconfig-paths/register --bail \
+        server/tests/client.ts \
         server/tests/feeds/index.ts \
         server/tests/misc-endpoints.ts \
         server/tests/helpers/index.ts \
@@ -32,10 +35,16 @@ elif [ "$1" = "api-3" ]; then
 elif [ "$1" = "api-4" ]; then
     npm run build:server
     sh ./server/tests/api/ci-4.sh 2
+elif [ "$1" = "external-plugins" ]; then
+    npm run build:server
+    mocha --timeout 5000 --exit --require ts-node/register --require tsconfig-paths/register --bail server/tests/external-plugins/index.ts
 elif [ "$1" = "lint" ]; then
-    npm run tslint -- --project ./tsconfig.json -c ./tslint.json server.ts "server/**/*.ts" "shared/**/*.ts"
+    npm run eslint -- --ext .ts "server/**/*.ts" "shared/**/*.ts"
+    npm run swagger-cli -- validate support/doc/api/openapi.yaml
 
     ( cd client
       npm run lint
     )
 fi
+
+git checkout -- config/test.yaml

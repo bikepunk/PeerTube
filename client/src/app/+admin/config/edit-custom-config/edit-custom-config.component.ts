@@ -1,30 +1,37 @@
-import { Component, OnInit } from '@angular/core'
-import { ConfigService } from '@app/+admin/config/shared/config.service'
-import { ServerService } from '@app/core/server/server.service'
-import { CustomConfigValidatorsService, FormReactive, UserValidatorsService } from '@app/shared'
-import { Notifier } from '@app/core'
-import { CustomConfig } from '../../../../../../shared/models/server/custom-config.model'
-import { I18n } from '@ngx-translate/i18n-polyfill'
-import { FormValidatorService } from '@app/shared/forms/form-validators/form-validator.service'
 import { SelectItem } from 'primeng/api'
 import { forkJoin } from 'rxjs'
-import { first } from 'rxjs/operators'
+import { ViewportScroller } from '@angular/common'
+import { AfterViewChecked, Component, OnInit, ViewChild } from '@angular/core'
+import { ConfigService } from '@app/+admin/config/shared/config.service'
+import { Notifier } from '@app/core'
+import { ServerService } from '@app/core/server/server.service'
+import { CustomConfigValidatorsService, FormReactive, FormValidatorService, UserValidatorsService } from '@app/shared/shared-forms'
+import { NgbNav } from '@ng-bootstrap/ng-bootstrap'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { CustomConfig, ServerConfig } from '@shared/models'
 
 @Component({
   selector: 'my-edit-custom-config',
   templateUrl: './edit-custom-config.component.html',
   styleUrls: [ './edit-custom-config.component.scss' ]
 })
-export class EditCustomConfigComponent extends FormReactive implements OnInit {
+export class EditCustomConfigComponent extends FormReactive implements OnInit, AfterViewChecked {
+  // FIXME: use built-in router
+  @ViewChild('nav') nav: NgbNav
+
+  initDone = false
   customConfig: CustomConfig
 
-  resolutions: { id: string, label: string }[] = []
+  resolutions: { id: string, label: string, description?: string }[] = []
   transcodingThreadOptions: { label: string, value: number }[] = []
 
   languageItems: SelectItem[] = []
   categoryItems: SelectItem[] = []
 
+  private serverConfig: ServerConfig
+
   constructor (
+    private viewportScroller: ViewportScroller,
     protected formValidatorService: FormValidatorService,
     private customConfigValidatorsService: CustomConfigValidatorsService,
     private userValidatorsService: UserValidatorsService,
@@ -38,7 +45,8 @@ export class EditCustomConfigComponent extends FormReactive implements OnInit {
     this.resolutions = [
       {
         id: '0p',
-        label: this.i18n('Audio-only')
+        label: this.i18n('Audio-only'),
+        description: this.i18n('A <code>.mp4</code> that keeps the original audio track, with no video')
       },
       {
         id: '240p',
@@ -84,7 +92,7 @@ export class EditCustomConfigComponent extends FormReactive implements OnInit {
   }
 
   get availableThemes () {
-    return this.serverService.getConfig().theme.registered
+    return this.serverConfig.theme.registered
       .map(t => t.name)
   }
 
@@ -93,6 +101,10 @@ export class EditCustomConfigComponent extends FormReactive implements OnInit {
   }
 
   ngOnInit () {
+    this.serverConfig = this.serverService.getTmpConfig()
+    this.serverService.getConfig()
+        .subscribe(config => this.serverConfig = config)
+
     const formGroupData: { [key in keyof CustomConfig ]: any } = {
       instance: {
         name: this.customConfigValidatorsService.INSTANCE_NAME,
@@ -201,6 +213,24 @@ export class EditCustomConfigComponent extends FormReactive implements OnInit {
             indexUrl: this.customConfigValidatorsService.INDEX_URL
           }
         }
+      },
+      broadcastMessage: {
+        enabled: null,
+        level: null,
+        dismissable: null,
+        message: null
+      },
+      search: {
+        remoteUri: {
+          users: null,
+          anonymous: null
+        },
+        searchIndex: {
+          enabled: null,
+          url: this.customConfigValidatorsService.SEARCH_INDEX_URL,
+          disableLocalSearch: null,
+          isDefaultSearch: null
+        }
       }
     }
 
@@ -215,28 +245,15 @@ export class EditCustomConfigComponent extends FormReactive implements OnInit {
     }
 
     this.buildForm(formGroupData)
+    this.loadForm()
+    this.checkTranscodingFields()
+  }
 
-    forkJoin([
-      this.configService.getCustomConfig(),
-      this.serverService.videoLanguagesLoaded.pipe(first()), // First so the observable completes
-      this.serverService.videoCategoriesLoaded.pipe(first())
-    ]).subscribe(
-      ([ config ]) => {
-        this.customConfig = config
-
-        const languages = this.serverService.getVideoLanguages()
-        this.languageItems = languages.map(l => ({ label: l.label, value: l.id }))
-
-        const categories = this.serverService.getVideoCategories()
-        this.categoryItems = categories.map(l => ({ label: l.label, value: l.id }))
-
-        this.updateForm()
-        // Force form validation
-        this.forceCheck()
-      },
-
-      err => this.notifier.error(err.message)
-    )
+  ngAfterViewChecked () {
+    if (!this.initDone) {
+      this.initDone = true
+      this.gotoAnchor()
+    }
   }
 
   isTranscodingEnabled () {
@@ -247,14 +264,22 @@ export class EditCustomConfigComponent extends FormReactive implements OnInit {
     return this.form.value['signup']['enabled'] === true
   }
 
+  isSearchIndexEnabled () {
+    return this.form.value['search']['searchIndex']['enabled'] === true
+  }
+
+  isAutoFollowIndexEnabled () {
+    return this.form.value['followings']['instance']['autoFollowIndex']['enabled'] === true
+  }
+
   async formValidated () {
-    this.configService.updateCustomConfig(this.form.value)
+    this.configService.updateCustomConfig(this.form.getRawValue())
       .subscribe(
         res => {
           this.customConfig = res
 
           // Reload general configuration
-          this.serverService.loadConfig()
+          this.serverService.resetConfig()
 
           this.updateForm()
 
@@ -281,7 +306,67 @@ export class EditCustomConfigComponent extends FormReactive implements OnInit {
     return this.i18n('No category')
   }
 
+  gotoAnchor () {
+    const hashToNav = {
+      'customizations': 'advanced-configuration'
+    }
+    const hash = window.location.hash.replace('#', '')
+
+    if (hash && Object.keys(hashToNav).includes(hash)) {
+      this.nav.select(hashToNav[hash])
+      setTimeout(() => this.viewportScroller.scrollToAnchor(hash), 100)
+    }
+  }
+
   private updateForm () {
     this.form.patchValue(this.customConfig)
+  }
+
+  private loadForm () {
+    forkJoin([
+      this.configService.getCustomConfig(),
+      this.serverService.getVideoLanguages(),
+      this.serverService.getVideoCategories()
+    ]).subscribe(
+      ([ config, languages, categories ]) => {
+        this.customConfig = config
+
+        this.languageItems = languages.map(l => ({ label: l.label, value: l.id }))
+        this.categoryItems = categories.map(l => ({ label: l.label, value: l.id }))
+
+        this.updateForm()
+        // Force form validation
+        this.forceCheck()
+      },
+
+      err => this.notifier.error(err.message)
+    )
+  }
+
+  private checkTranscodingFields () {
+    const hlsControl = this.form.get('transcoding.hls.enabled')
+    const webtorrentControl = this.form.get('transcoding.webtorrent.enabled')
+
+    webtorrentControl.valueChanges
+                     .subscribe(newValue => {
+                       if (newValue === false && !hlsControl.disabled) {
+                         hlsControl.disable()
+                       }
+
+                       if (newValue === true && !hlsControl.enabled) {
+                         hlsControl.enable()
+                       }
+                     })
+
+    hlsControl.valueChanges
+              .subscribe(newValue => {
+                if (newValue === false && !webtorrentControl.disabled) {
+                  webtorrentControl.disable()
+                }
+
+                if (newValue === true && !webtorrentControl.enabled) {
+                  webtorrentControl.enable()
+                }
+              })
   }
 }

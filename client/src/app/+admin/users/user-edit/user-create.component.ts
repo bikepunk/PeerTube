@@ -1,13 +1,11 @@
 import { Component, OnInit } from '@angular/core'
-import { Router } from '@angular/router'
-import { AuthService, Notifier, ServerService } from '@app/core'
-import { UserCreate, UserRole } from '../../../../../../shared'
-import { UserEdit } from './user-edit'
-import { I18n } from '@ngx-translate/i18n-polyfill'
-import { FormValidatorService } from '@app/shared/forms/form-validators/form-validator.service'
-import { UserValidatorsService } from '@app/shared/forms/form-validators/user-validators.service'
+import { ActivatedRoute, Router } from '@angular/router'
 import { ConfigService } from '@app/+admin/config/shared/config.service'
-import { UserService } from '@app/shared'
+import { AuthService, Notifier, ScreenService, ServerService, UserService } from '@app/core'
+import { FormValidatorService, UserValidatorsService } from '@app/shared/shared-forms'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { UserCreate, UserRole } from '@shared/models'
+import { UserEdit } from './user-edit'
 
 @Component({
   selector: 'my-user-create',
@@ -21,8 +19,10 @@ export class UserCreateComponent extends UserEdit implements OnInit {
     protected serverService: ServerService,
     protected formValidatorService: FormValidatorService,
     protected configService: ConfigService,
+    protected screenService: ScreenService,
     protected auth: AuthService,
     private userValidatorsService: UserValidatorsService,
+    private route: ActivatedRoute,
     private router: Router,
     private notifier: Notifier,
     private userService: UserService,
@@ -34,6 +34,8 @@ export class UserCreateComponent extends UserEdit implements OnInit {
   }
 
   ngOnInit () {
+    super.ngOnInit()
+
     const defaultValues = {
       role: UserRole.USER.toString(),
       videoQuota: '-1',
@@ -43,11 +45,11 @@ export class UserCreateComponent extends UserEdit implements OnInit {
     this.buildForm({
       username: this.userValidatorsService.USER_USERNAME,
       email: this.userValidatorsService.USER_EMAIL,
-      password: this.userValidatorsService.USER_PASSWORD,
+      password: this.isPasswordOptional() ? this.userValidatorsService.USER_PASSWORD_OPTIONAL : this.userValidatorsService.USER_PASSWORD,
       role: this.userValidatorsService.USER_ROLE,
       videoQuota: this.userValidatorsService.USER_VIDEO_QUOTA,
       videoQuotaDaily: this.userValidatorsService.USER_VIDEO_QUOTA_DAILY,
-      byPassAutoBlacklist: null
+      byPassAutoBlock: null
     }, defaultValues)
   }
 
@@ -74,6 +76,11 @@ export class UserCreateComponent extends UserEdit implements OnInit {
 
   isCreation () {
     return true
+  }
+
+  isPasswordOptional () {
+    const serverConfig = this.route.snapshot.data.serverConfig
+    return serverConfig.email.enabled
   }
 
   getFormButtonTitle () {

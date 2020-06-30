@@ -27,8 +27,8 @@ import { authenticatePromiseIfNeeded } from '../../oauth'
 import { VideoPlaylistPrivacy } from '../../../../shared/models/videos/playlist/video-playlist-privacy.model'
 import { VideoPlaylistType } from '../../../../shared/models/videos/playlist/video-playlist-type.model'
 import { doesVideoChannelIdExist, doesVideoExist, doesVideoPlaylistExist, VideoPlaylistFetchType } from '../../../helpers/middlewares'
-import { MVideoPlaylist } from '../../../typings/models/video/video-playlist'
-import { MUserAccountId } from '@server/typings/models'
+import { MVideoPlaylist } from '../../../types/models/video/video-playlist'
+import { MUserAccountId } from '@server/types/models'
 
 const videoPlaylistsAddValidator = getCommonPlaylistEditAttributes().concat([
   body('displayName')
@@ -165,6 +165,18 @@ const videoPlaylistsGetValidator = (fetchType: VideoPlaylistFetchType) => {
     }
   ]
 }
+
+const videoPlaylistsSearchValidator = [
+  query('search').optional().not().isEmpty().withMessage('Should have a valid search'),
+
+  (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    logger.debug('Checking videoPlaylists search query', { parameters: req.query })
+
+    if (areValidationErrors(req, res)) return
+
+    return next()
+  }
+]
 
 const videoPlaylistsAddVideoValidator = [
   param('playlistId')
@@ -354,6 +366,7 @@ export {
   videoPlaylistsUpdateValidator,
   videoPlaylistsDeleteValidator,
   videoPlaylistsGetValidator,
+  videoPlaylistsSearchValidator,
 
   videoPlaylistsAddVideoValidator,
   videoPlaylistsUpdateOrRemoveVideoValidator,
@@ -371,10 +384,11 @@ export {
 function getCommonPlaylistEditAttributes () {
   return [
     body('thumbnailfile')
-      .custom((value, { req }) => isVideoImage(req.files, 'thumbnailfile')).withMessage(
-      'This thumbnail file is not supported or too large. Please, make sure it is of the following type: '
-      + CONSTRAINTS_FIELDS.VIDEO_PLAYLISTS.IMAGE.EXTNAME.join(', ')
-    ),
+      .custom((value, { req }) => isVideoImage(req.files, 'thumbnailfile'))
+      .withMessage(
+        'This thumbnail file is not supported or too large. Please, make sure it is of the following type: ' +
+        CONSTRAINTS_FIELDS.VIDEO_PLAYLISTS.IMAGE.EXTNAME.join(', ')
+      ),
 
     body('description')
       .optional()

@@ -1,12 +1,10 @@
+import { SortMeta } from 'primeng/api'
 import { Component, OnInit, ViewChild } from '@angular/core'
-import { AuthService, Notifier } from '@app/core'
-import { SortMeta } from 'primeng/components/common/sortmeta'
-import { ConfirmService, ServerService } from '../../../core'
-import { RestPagination, RestTable, UserService } from '../../../shared'
+import { AuthService, ConfirmService, Notifier, RestPagination, RestTable, ServerService, UserService } from '@app/core'
+import { Actor, DropdownAction } from '@app/shared/shared-main'
+import { UserBanModalComponent } from '@app/shared/shared-moderation'
 import { I18n } from '@ngx-translate/i18n-polyfill'
-import { User } from '../../../../../../shared'
-import { UserBanModalComponent } from '@app/shared/moderation'
-import { DropdownAction } from '@app/shared/buttons/action-dropdown.component'
+import { ServerConfig, User } from '@shared/models'
 
 @Component({
   selector: 'my-user-list',
@@ -18,12 +16,13 @@ export class UserListComponent extends RestTable implements OnInit {
 
   users: User[] = []
   totalRecords = 0
-  rowsPerPage = 10
   sort: SortMeta = { field: 'createdAt', order: 1 }
   pagination: RestPagination = { count: this.rowsPerPage, start: 0 }
 
   selectedUsers: User[] = []
-  bulkUserActions: DropdownAction<User[]>[] = []
+  bulkUserActions: DropdownAction<User[]>[][] = []
+
+  private serverConfig: ServerConfig
 
   constructor (
     private notifier: Notifier,
@@ -41,37 +40,51 @@ export class UserListComponent extends RestTable implements OnInit {
   }
 
   get requiresEmailVerification () {
-    return this.serverService.getConfig().signup.requiresEmailVerification
+    return this.serverConfig.signup.requiresEmailVerification
   }
 
   ngOnInit () {
+    this.serverConfig = this.serverService.getTmpConfig()
+    this.serverService.getConfig()
+        .subscribe(config => this.serverConfig = config)
+
     this.initialize()
 
     this.bulkUserActions = [
-      {
-        label: this.i18n('Delete'),
-        handler: users => this.removeUsers(users),
-        isDisplayed: users => users.every(u => this.authUser.canManage(u))
-      },
-      {
-        label: this.i18n('Ban'),
-        handler: users => this.openBanUserModal(users),
-        isDisplayed: users => users.every(u => this.authUser.canManage(u) && u.blocked === false)
-      },
-      {
-        label: this.i18n('Unban'),
-        handler: users => this.unbanUsers(users),
-        isDisplayed: users => users.every(u => this.authUser.canManage(u) && u.blocked === true)
-      },
-      {
-        label: this.i18n('Set Email as Verified'),
-        handler: users => this.setEmailsAsVerified(users),
-        isDisplayed: users => {
-          return this.requiresEmailVerification &&
-            users.every(u => this.authUser.canManage(u) && !u.blocked && u.emailVerified === false)
+      [
+        {
+          label: this.i18n('Delete'),
+          description: this.i18n('Videos will be deleted, comments will be tombstoned.'),
+          handler: users => this.removeUsers(users),
+          isDisplayed: users => users.every(u => this.authUser.canManage(u))
+        },
+        {
+          label: this.i18n('Ban'),
+          description: this.i18n('User won\'t be able to login anymore, but videos and comments will be kept as is.'),
+          handler: users => this.openBanUserModal(users),
+          isDisplayed: users => users.every(u => this.authUser.canManage(u) && u.blocked === false)
+        },
+        {
+          label: this.i18n('Unban'),
+          handler: users => this.unbanUsers(users),
+          isDisplayed: users => users.every(u => this.authUser.canManage(u) && u.blocked === true)
         }
-      }
+      ],
+      [
+        {
+          label: this.i18n('Set Email as Verified'),
+          handler: users => this.setEmailsAsVerified(users),
+          isDisplayed: users => {
+            return this.requiresEmailVerification &&
+              users.every(u => this.authUser.canManage(u) && !u.blocked && u.emailVerified === false)
+          }
+        }
+      ]
     ]
+  }
+
+  getIdentifier () {
+    return 'UserListComponent'
   }
 
   openBanUserModal (users: User[]) {
@@ -87,6 +100,10 @@ export class UserListComponent extends RestTable implements OnInit {
 
   onUserChanged () {
     this.loadData()
+  }
+
+  switchToDefaultAvatar ($event: Event) {
+    ($event.target as HTMLImageElement).src = Actor.GET_DEFAULT_AVATAR_URL()
   }
 
   async unbanUsers (users: User[]) {

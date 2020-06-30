@@ -1,14 +1,10 @@
 import { Component, ElementRef, EventEmitter, OnInit, Output, ViewChild } from '@angular/core'
 import { AuthService, Notifier } from '@app/core'
-import { FormReactive } from '@app/shared'
-import { FormValidatorService } from '@app/shared/forms/form-validators/form-validator.service'
-import { VideoOwnershipService } from '@app/shared/video-ownership'
-import { VideoChangeOwnership } from '../../../../../../shared/models/videos'
-import { VideoAcceptOwnershipValidatorsService } from '@app/shared/forms/form-validators'
-import { VideoChannel } from '@app/shared/video-channel/video-channel.model'
-import { VideoChannelService } from '@app/shared/video-channel/video-channel.service'
-import { I18n } from '@ngx-translate/i18n-polyfill'
+import { FormReactive, FormValidatorService, VideoAcceptOwnershipValidatorsService } from '@app/shared/shared-forms'
+import { VideoChannelService, VideoOwnershipService } from '@app/shared/shared-main'
 import { NgbModal } from '@ng-bootstrap/ng-bootstrap'
+import { I18n } from '@ngx-translate/i18n-polyfill'
+import { VideoChangeOwnership, VideoChannel } from '@shared/models'
 
 @Component({
   selector: 'my-account-accept-ownership',
@@ -53,7 +49,7 @@ export class MyAccountAcceptOwnershipComponent extends FormReactive implements O
   show (videoChangeOwnership: VideoChangeOwnership) {
     this.videoChangeOwnership = videoChangeOwnership
     this.modalService
-      .open(this.modal)
+      .open(this.modal, { centered: true })
       .result
       .then(() => this.acceptOwnership())
       .catch(() => this.videoChangeOwnership = undefined)

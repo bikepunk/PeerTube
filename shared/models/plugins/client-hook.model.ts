@@ -1,4 +1,5 @@
 // Data from API hooks: {hookType}:api.{location}.{elementType}.{actionType}.{target}
+// Data in internal functions: {hookType}:{location}.{elementType}.{actionType}.{target}
 
 export const clientFilterHookObject = {
   // Filter params/result of the function that fetch videos of the trending page
@@ -41,7 +42,15 @@ export const clientFilterHookObject = {
   'filter:api.search.video-channels.list.result': true,
 
   // Filter form
-  'filter:api.signup.registration.create.params': true
+  'filter:api.signup.registration.create.params': true,
+
+  // Filter the options to create our player
+  'filter:internal.video-watch.player.build-options.params': true,
+  'filter:internal.video-watch.player.build-options.result': true,
+
+  // Filter our SVG icons content
+  'filter:internal.common.svg-icons.get-content.params': true,
+  'filter:internal.common.svg-icons.get-content.result': true
 }
 
 export type ClientFilterHookName = keyof typeof clientFilterHookObject
@@ -56,6 +65,13 @@ export const clientActionHookObject = {
   'action:video-watch.video.loaded': true,
   // Fired when the player finished loading
   'action:video-watch.player.loaded': true,
+  // Fired when the video watch page comments(threads) are loaded and load more comments on scroll
+  'action:video-watch.video-threads.loaded': true,
+  // Fired when a user click on 'View x replies' and they're loaded
+  'action:video-watch.video-thread-replies.loaded': true,
+
+  // Fired when the login page is being initialized
+  'action:login.init': true,
 
   // Fired when the search page is being initialized
   'action:search.init': true,

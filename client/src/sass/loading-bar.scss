@@ -1,3 +1,4 @@
+@import '_mixins';
 // Thanks: https://github.com/aitboudad/ngx-loading-bar/blob/master/loading-bar.css
 
 /* Make clicks pass-through */
@@ -9,7 +10,7 @@
   -moz-transition: 350ms linear all;
   -o-transition: 350ms linear all;
   transition: 350ms linear all;
-  color: var(--mainColor);
+  color: pvar(--mainColor);
 }
 
 #loading-bar .bar {
@@ -18,9 +19,9 @@
   -o-transition: width 350ms;
   transition: width 350ms;
 
-  background: var(--mainColor);
+  background: pvar(--mainColor);
   position: fixed;
-  z-index: 10002;
+  z-index: z(loadbar);
   top: 0;
   left: 0;
   width: 100%;
@@ -50,7 +51,7 @@
 #loading-bar-spinner {
   display: block;
   position: fixed;
-  z-index: 10002;
+  z-index: z(loadbar);
   top: 10px;
   left: 10px;
 }

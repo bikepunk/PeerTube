@@ -1,10 +1,14 @@
-import { peertubeLocalStorage } from '@app/shared/misc/peertube-local-storage'
-import { UserRight } from '../../../../../shared/models/users/user-right.enum'
-import { User as ServerUserModel } from '../../../../../shared/models/users/user.model'
-// Do not use the barrel (dependency loop)
-import { hasUserRight, UserRole } from '../../../../../shared/models/users/user-role'
-import { User } from '../../shared/users/user.model'
-import { NSFWPolicyType } from '../../../../../shared/models/videos/nsfw-policy.type'
+import { User } from '@app/core/users/user.model'
+import { peertubeLocalStorage } from '@app/helpers/peertube-web-storage'
+import {
+  hasUserRight,
+  MyUser as ServerMyUserModel,
+  MyUserSpecialPlaylist,
+  NSFWPolicyType,
+  User as ServerUserModel,
+  UserRight,
+  UserRole
+} from '@shared/models'
 
 export type TokenOptions = {
   accessToken: string
@@ -66,19 +70,9 @@ class Tokens {
   }
 }
 
-export class AuthUser extends User {
-  private static KEYS = {
-    ID: 'id',
-    ROLE: 'role',
-    EMAIL: 'email',
-    VIDEOS_HISTORY_ENABLED: 'videos-history-enabled',
-    USERNAME: 'username',
-    NSFW_POLICY: 'nsfw_policy',
-    WEBTORRENT_ENABLED: 'peertube-videojs-' + 'webtorrent_enabled',
-    AUTO_PLAY_VIDEO: 'auto_play_video'
-  }
-
+export class AuthUser extends User implements ServerMyUserModel {
   tokens: Tokens
+  specialPlaylists: MyUserSpecialPlaylist[]
 
   static load () {
     const usernameLocalStorage = peertubeLocalStorage.getItem(this.KEYS.USERNAME)
@@ -105,17 +99,15 @@ export class AuthUser extends User {
     peertubeLocalStorage.removeItem(this.KEYS.USERNAME)
     peertubeLocalStorage.removeItem(this.KEYS.ID)
     peertubeLocalStorage.removeItem(this.KEYS.ROLE)
-    peertubeLocalStorage.removeItem(this.KEYS.NSFW_POLICY)
-    peertubeLocalStorage.removeItem(this.KEYS.WEBTORRENT_ENABLED)
-    peertubeLocalStorage.removeItem(this.KEYS.VIDEOS_HISTORY_ENABLED)
-    peertubeLocalStorage.removeItem(this.KEYS.AUTO_PLAY_VIDEO)
     peertubeLocalStorage.removeItem(this.KEYS.EMAIL)
     Tokens.flush()
   }
 
-  constructor (userHash: Partial<ServerUserModel>, hashTokens: TokenOptions) {
+  constructor (userHash: Partial<ServerMyUserModel>, hashTokens: TokenOptions) {
     super(userHash)
+
     this.tokens = new Tokens(hashTokens)
+    this.specialPlaylists = userHash.specialPlaylists
   }
 
   getAccessToken () {

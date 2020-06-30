@@ -1,13 +1,11 @@
+import { Hotkey, HotkeysService } from 'angular2-hotkeys'
+import { Subscription } from 'rxjs'
+import { catchError, distinctUntilChanged, map, switchMap } from 'rxjs/operators'
 import { Component, OnDestroy, OnInit, ViewChild } from '@angular/core'
 import { ActivatedRoute } from '@angular/router'
-import { VideoChannel } from '@app/shared/video-channel/video-channel.model'
-import { VideoChannelService } from '@app/shared/video-channel/video-channel.service'
-import { RestExtractor } from '@app/shared'
-import { catchError, distinctUntilChanged, map, switchMap } from 'rxjs/operators'
-import { Subscription } from 'rxjs'
-import { AuthService } from '@app/core'
-import { Hotkey, HotkeysService } from 'angular2-hotkeys'
-import { SubscribeButtonComponent } from '@app/shared/user-subscription/subscribe-button.component'
+import { AuthService, Notifier, RestExtractor, ScreenService } from '@app/core'
+import { ListOverflowItem, VideoChannel, VideoChannelService } from '@app/shared/shared-main'
+import { SubscribeButtonComponent } from '@app/shared/shared-user-subscription'
 import { I18n } from '@ngx-translate/i18n-polyfill'
 
 @Component({
@@ -15,20 +13,24 @@ import { I18n } from '@ngx-translate/i18n-polyfill'
   styleUrls: [ './video-channels.component.scss' ]
 })
 export class VideoChannelsComponent implements OnInit, OnDestroy {
-  @ViewChild('subscribeButton', { static: false }) subscribeButton: SubscribeButtonComponent
+  @ViewChild('subscribeButton') subscribeButton: SubscribeButtonComponent
 
   videoChannel: VideoChannel
   hotkeys: Hotkey[]
+  links: ListOverflowItem[] = []
+  isChannelManageable = false
 
   private routeSub: Subscription
 
   constructor (
     private i18n: I18n,
     private route: ActivatedRoute,
+    private notifier: Notifier,
     private authService: AuthService,
     private videoChannelService: VideoChannelService,
     private restExtractor: RestExtractor,
-    private hotkeysService: HotkeysService
+    private hotkeysService: HotkeysService,
+    private screenService: ScreenService
   ) { }
 
   ngOnInit () {
@@ -39,7 +41,17 @@ export class VideoChannelsComponent implements OnInit, OnDestroy {
                           switchMap(videoChannelName => this.videoChannelService.getVideoChannel(videoChannelName)),
                           catchError(err => this.restExtractor.redirectTo404IfNotFound(err, [ 400, 404 ]))
                         )
-                        .subscribe(videoChannel => this.videoChannel = videoChannel)
+                        .subscribe(videoChannel => {
+                          this.videoChannel = videoChannel
+
+                          if (this.authService.isLoggedIn()) {
+                            this.authService.userInformationLoaded
+                              .subscribe(() => {
+                                const channelUserId = this.videoChannel.ownerAccount.userId
+                                this.isChannelManageable = channelUserId && channelUserId === this.authService.getUser().id
+                              })
+                          }
+                        })
 
     this.hotkeys = [
       new Hotkey('S', (event: KeyboardEvent): boolean => {
@@ -50,6 +62,12 @@ export class VideoChannelsComponent implements OnInit, OnDestroy {
       }, undefined, this.i18n('Subscribe to the account'))
     ]
     if (this.isUserLoggedIn()) this.hotkeysService.add(this.hotkeys)
+
+    this.links = [
+      { label: this.i18n('VIDEOS'), routerLink: 'videos' },
+      { label: this.i18n('VIDEO PLAYLISTS'), routerLink: 'video-playlists' },
+      { label: this.i18n('ABOUT'), routerLink: 'about' }
+    ]
   }
 
   ngOnDestroy () {
@@ -59,7 +77,20 @@ export class VideoChannelsComponent implements OnInit, OnDestroy {
     if (this.isUserLoggedIn()) this.hotkeysService.remove(this.hotkeys)
   }
 
+  get isInSmallView () {
+    return this.screenService.isInSmallView()
+  }
+
   isUserLoggedIn () {
     return this.authService.isLoggedIn()
+  }
+
+  get isManageable () {
+    if (!this.isUserLoggedIn()) return false
+    return this.videoChannel.ownerAccount.userId === this.authService.getUser().id
+  }
+
+  activateCopiedMessage () {
+    this.notifier.success(this.i18n('Username copied'))
   }
 }

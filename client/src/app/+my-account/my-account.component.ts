@@ -1,20 +1,28 @@
-import { Component } from '@angular/core'
+import { Component, OnInit } from '@angular/core'
 import { ServerService } from '@app/core'
 import { I18n } from '@ngx-translate/i18n-polyfill'
-import { TopMenuDropdownParam } from '@app/shared/menu/top-menu-dropdown.component'
+import { ServerConfig } from '@shared/models'
+import { TopMenuDropdownParam } from './top-menu-dropdown.component'
 
 @Component({
   selector: 'my-my-account',
   templateUrl: './my-account.component.html',
   styleUrls: [ './my-account.component.scss' ]
 })
-export class MyAccountComponent {
+export class MyAccountComponent implements OnInit {
   menuEntries: TopMenuDropdownParam[] = []
+
+  private serverConfig: ServerConfig
 
   constructor (
     private serverService: ServerService,
     private i18n: I18n
-  ) {
+  ) { }
+
+  ngOnInit (): void {
+    this.serverConfig = this.serverService.getTmpConfig()
+    this.serverService.getConfig()
+        .subscribe(config => this.serverConfig = config)
 
     const libraryEntries: TopMenuDropdownParam = {
       label: this.i18n('My library'),
@@ -64,14 +72,14 @@ export class MyAccountComponent {
           iconName: 'user'
         },
         {
-          label: this.i18n('Muted instances'),
+          label: this.i18n('Muted servers'),
           routerLink: '/my-account/blocklist/servers',
           iconName: 'server'
         },
         {
           label: this.i18n('Ownership changes'),
           routerLink: '/my-account/ownership',
-          iconName: 'im-with-her'
+          iconName: 'forward'
         }
       ]
     }
@@ -91,7 +99,7 @@ export class MyAccountComponent {
   }
 
   isVideoImportEnabled () {
-    const importConfig = this.serverService.getConfig().import.videos
+    const importConfig = this.serverConfig.import.videos
 
     return importConfig.http.enabled || importConfig.torrent.enabled
   }

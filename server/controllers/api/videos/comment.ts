@@ -1,10 +1,12 @@
 import * as express from 'express'
 import { ResultList } from '../../../../shared/models'
 import { VideoCommentCreate } from '../../../../shared/models/videos/video-comment.model'
-import { logger } from '../../../helpers/logger'
+import { auditLoggerFactory, CommentAuditView, getAuditIdFromRes } from '../../../helpers/audit-logger'
 import { getFormattedObjects } from '../../../helpers/utils'
-import { sequelizeTypescript } from '../../../initializers'
-import { buildFormattedCommentTree, createVideoComment } from '../../../lib/video-comment'
+import { sequelizeTypescript } from '../../../initializers/database'
+import { Notifier } from '../../../lib/notifier'
+import { Hooks } from '../../../lib/plugins/hooks'
+import { buildFormattedCommentTree, createVideoComment, removeComment } from '../../../lib/video-comment'
 import {
   asyncMiddleware,
   asyncRetryTransactionMiddleware,
@@ -22,12 +24,8 @@ import {
   removeVideoCommentValidator,
   videoCommentThreadsSortValidator
 } from '../../../middlewares/validators'
-import { VideoCommentModel } from '../../../models/video/video-comment'
-import { auditLoggerFactory, CommentAuditView, getAuditIdFromRes } from '../../../helpers/audit-logger'
 import { AccountModel } from '../../../models/account/account'
-import { Notifier } from '../../../lib/notifier'
-import { Hooks } from '../../../lib/plugins/hooks'
-import { sendDeleteVideoComment } from '../../../lib/activitypub/send'
+import { VideoCommentModel } from '../../../models/video/video-comment'
 
 const auditLogger = auditLoggerFactory('comments')
 const videoCommentRouter = express.Router()
@@ -80,6 +78,7 @@ async function listVideoThreads (req: express.Request, res: express.Response) {
   if (video.commentsEnabled === true) {
     const apiOptions = await Hooks.wrapObject({
       videoId: video.id,
+      isVideoOwned: video.isOwned(),
       start: req.query.start,
       count: req.query.count,
       sort: req.query.sort,
@@ -110,6 +109,7 @@ async function listVideoThreadComments (req: express.Request, res: express.Respo
   if (video.commentsEnabled === true) {
     const apiOptions = await Hooks.wrapObject({
       videoId: video.id,
+      isVideoOwned: video.isOwned(),
       threadId: res.locals.videoCommentThread.id,
       user
     }, 'filter:api.video-thread-comments.list.params')
@@ -148,9 +148,7 @@ async function addVideoCommentThread (req: express.Request, res: express.Respons
 
   Hooks.runAction('action:api.video-thread.created', { comment })
 
-  return res.json({
-    comment: comment.toFormattedJSON()
-  }).end()
+  return res.json({ comment: comment.toFormattedJSON() })
 }
 
 async function addVideoCommentReply (req: express.Request, res: express.Response) {
@@ -172,24 +170,15 @@ async function addVideoCommentReply (req: express.Request, res: express.Response
 
   Hooks.runAction('action:api.video-comment-reply.created', { comment })
 
-  return res.json({ comment: comment.toFormattedJSON() }).end()
+  return res.json({ comment: comment.toFormattedJSON() })
 }
 
 async function removeVideoComment (req: express.Request, res: express.Response) {
   const videoCommentInstance = res.locals.videoCommentFull
 
-  await sequelizeTypescript.transaction(async t => {
-    await videoCommentInstance.destroy({ transaction: t })
-
-    if (videoCommentInstance.isOwned() || videoCommentInstance.Video.isOwned()) {
-      await sendDeleteVideoComment(videoCommentInstance, t)
-    }
-  })
+  await removeComment(videoCommentInstance)
 
   auditLogger.delete(getAuditIdFromRes(res), new CommentAuditView(videoCommentInstance.toFormattedJSON()))
-  logger.info('Video comment %d deleted.', videoCommentInstance.id)
-
-  Hooks.runAction('action:api.video-comment.deleted', { comment: videoCommentInstance })
 
   return res.type('json').status(204).end()
 }

@@ -27,13 +27,15 @@ import { VideoCommentModel } from '../video/video-comment'
 import { UserModel } from './user'
 import { AvatarModel } from '../avatar/avatar'
 import { VideoPlaylistModel } from '../video/video-playlist'
-import { CONSTRAINTS_FIELDS, WEBSERVER } from '../../initializers/constants'
+import { CONSTRAINTS_FIELDS, SERVER_ACTOR_NAME, WEBSERVER } from '../../initializers/constants'
 import { FindOptions, IncludeOptions, Op, Transaction, WhereOptions } from 'sequelize'
 import { AccountBlocklistModel } from './account-blocklist'
 import { ServerBlocklistModel } from '../server/server-blocklist'
 import { ActorFollowModel } from '../activitypub/actor-follow'
-import { MAccountActor, MAccountDefault, MAccountSummaryFormattable, MAccountFormattable, MAccountAP } from '../../typings/models'
+import { MAccountActor, MAccountAP, MAccountDefault, MAccountFormattable, MAccountSummaryFormattable, MAccount } from '../../types/models'
 import * as Bluebird from 'bluebird'
+import { ModelCache } from '@server/models/model-cache'
+import { VideoModel } from '../video/video'
 
 export enum ScopeNames {
   SUMMARY = 'SUMMARY'
@@ -53,7 +55,7 @@ export type SummaryOptions = {
   ]
 }))
 @Scopes(() => ({
-  [ ScopeNames.SUMMARY ]: (options: SummaryOptions = {}) => {
+  [ScopeNames.SUMMARY]: (options: SummaryOptions = {}) => {
     const whereActor = options.whereActor || undefined
 
     const serverInclude: IncludeOptions = {
@@ -201,7 +203,7 @@ export class AccountModel extends Model<AccountModel> {
 
   @HasMany(() => VideoCommentModel, {
     foreignKey: {
-      allowNull: false
+      allowNull: true
     },
     onDelete: 'cascade',
     hooks: true
@@ -221,7 +223,7 @@ export class AccountModel extends Model<AccountModel> {
   @BeforeDestroy
   static async sendDeleteIfOwned (instance: AccountModel, options) {
     if (!instance.Actor) {
-      instance.Actor = await instance.$get('Actor', { transaction: options.transaction }) as ActorModel
+      instance.Actor = await instance.$get('Actor', { transaction: options.transaction })
     }
 
     await ActorFollowModel.removeFollowsOf(instance.Actor.id, options.transaction)
@@ -245,33 +247,43 @@ export class AccountModel extends Model<AccountModel> {
   }
 
   static loadLocalByName (name: string): Bluebird<MAccountDefault> {
-    const query = {
-      where: {
-        [ Op.or ]: [
-          {
-            userId: {
-              [ Op.ne ]: null
+    const fun = () => {
+      const query = {
+        where: {
+          [Op.or]: [
+            {
+              userId: {
+                [Op.ne]: null
+              }
+            },
+            {
+              applicationId: {
+                [Op.ne]: null
+              }
             }
-          },
+          ]
+        },
+        include: [
           {
-            applicationId: {
-              [ Op.ne ]: null
+            model: ActorModel,
+            required: true,
+            where: {
+              preferredUsername: name
             }
           }
         ]
-      },
-      include: [
-        {
-          model: ActorModel,
-          required: true,
-          where: {
-            preferredUsername: name
-          }
-        }
-      ]
+      }
+
+      return AccountModel.findOne(query)
     }
 
-    return AccountModel.findOne(query)
+    return ModelCache.Instance.doCache({
+      cacheType: 'local-account-name',
+      key: name,
+      fun,
+      // The server actor never change, so we can easily cache it
+      whitelist: () => name === SERVER_ACTOR_NAME
+    })
   }
 
   static loadByNameAndHost (name: string, host: string): Bluebird<MAccountDefault> {
@@ -330,6 +342,29 @@ export class AccountModel extends Model<AccountModel> {
           total: count
         }
       })
+  }
+
+  static loadAccountIdFromVideo (videoId: number): Bluebird<MAccount> {
+    const query = {
+      include: [
+        {
+          attributes: [ 'id', 'accountId' ],
+          model: VideoChannelModel.unscoped(),
+          required: true,
+          include: [
+            {
+              attributes: [ 'id', 'channelId' ],
+              model: VideoModel.unscoped(),
+              where: {
+                id: videoId
+              }
+            }
+          ]
+        }
+      ]
+    }
+
+    return AccountModel.findOne(query)
   }
 
   static listLocalsForSitemap (sort: string): Bluebird<MAccountActor[]> {

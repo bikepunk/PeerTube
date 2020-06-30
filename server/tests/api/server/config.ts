@@ -1,4 +1,4 @@
-/* tslint:disable:no-unused-expression */
+/* eslint-disable @typescript-eslint/no-unused-expressions,@typescript-eslint/require-await */
 
 import 'mocha'
 import * as chai from 'chai'
@@ -11,11 +11,14 @@ import {
   getAbout,
   getConfig,
   getCustomConfig,
-  killallServers, parallelTests,
+  killallServers,
+  parallelTests,
   registerUser,
-  reRunServer, ServerInfo,
+  reRunServer,
+  ServerInfo,
   setAccessTokensToServers,
-  updateCustomConfig, uploadVideo
+  updateCustomConfig,
+  uploadVideo
 } from '../../../../shared/extra-utils'
 import { ServerConfig } from '../../../../shared/models'
 
@@ -24,8 +27,7 @@ const expect = chai.expect
 function checkInitialConfig (server: ServerInfo, data: CustomConfig) {
   expect(data.instance.name).to.equal('PeerTube')
   expect(data.instance.shortDescription).to.equal(
-    'PeerTube, a federated (ActivityPub) video streaming platform using P2P (BitTorrent) directly in the web browser ' +
-    'with WebTorrent and Angular.'
+    'PeerTube, an ActivityPub-federated video streaming platform using P2P directly in your web browser.'
   )
   expect(data.instance.description).to.equal('Welcome to this PeerTube instance!')
 
@@ -84,7 +86,12 @@ function checkInitialConfig (server: ServerInfo, data: CustomConfig) {
 
   expect(data.followings.instance.autoFollowBack.enabled).to.be.false
   expect(data.followings.instance.autoFollowIndex.enabled).to.be.false
-  expect(data.followings.instance.autoFollowIndex.indexUrl).to.equal('https://instances.joinpeertube.org')
+  expect(data.followings.instance.autoFollowIndex.indexUrl).to.equal('')
+
+  expect(data.broadcastMessage.enabled).to.be.false
+  expect(data.broadcastMessage.level).to.equal('info')
+  expect(data.broadcastMessage.message).to.equal('')
+  expect(data.broadcastMessage.dismissable).to.be.false
 }
 
 function checkUpdatedConfig (data: CustomConfig) {
@@ -153,6 +160,11 @@ function checkUpdatedConfig (data: CustomConfig) {
   expect(data.followings.instance.autoFollowBack.enabled).to.be.true
   expect(data.followings.instance.autoFollowIndex.enabled).to.be.true
   expect(data.followings.instance.autoFollowIndex.indexUrl).to.equal('https://updated.example.com')
+
+  expect(data.broadcastMessage.enabled).to.be.true
+  expect(data.broadcastMessage.level).to.equal('error')
+  expect(data.broadcastMessage.message).to.equal('super bad message')
+  expect(data.broadcastMessage.dismissable).to.be.true
 }
 
 describe('Test config', function () {
@@ -321,6 +333,24 @@ describe('Test config', function () {
             enabled: true,
             indexUrl: 'https://updated.example.com'
           }
+        }
+      },
+      broadcastMessage: {
+        enabled: true,
+        level: 'error',
+        message: 'super bad message',
+        dismissable: true
+      },
+      search: {
+        remoteUri: {
+          anonymous: true,
+          users: true
+        },
+        searchIndex: {
+          enabled: true,
+          url: 'https://search.joinpeertube.org',
+          disableLocalSearch: true,
+          isDefaultSearch: true
         }
       }
     }
